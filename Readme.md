@@ -84,14 +84,49 @@ A project with a local dependency:
 
 ```toml
 [project]
-name = "myapp"
-dependencies = ["./external/mathlib"]
+name = "testfmt"
+cpp_version = "c++23"
+dependencies = ["../fmt"]
 
-[target.myapp]
+[target.testfmt]
 type = "executable"
-sources = ["./src/main.cpp"]
-depends_on = ["./external/mathlib"]
+sources = ["src/main.cpp"]
+depends_on = ["fmt"]
 ```
+
+This works against any dependency that exposes a matching target name or declares it in `[exports]` — for example, a real, tested build against [fmt](https://github.com/fmtlib/fmt):
+
+```toml
+# fmt's own mokai.toml (abbreviated)
+[project]
+name = "fmt"
+cpp_version = "c++11"
+
+[target.fmt]
+type = "static_library"
+sources = ["src/format.cc"]
+include_dirs = ["include"]
+
+[exports]
+default_targets = ["fmt"]
+include_dirs = ["include"]
+```
+
+For dependencies with multiple targets, depend on a specific one with `package:target`:
+
+```toml
+[project]
+name = "mygame"
+cpp_version = "c++23"
+dependencies = ["sfml@3.1.0"]
+
+[target.mygame]
+type = "executable"
+sources = ["src/main.cpp"]
+depends_on = ["sfml:sfml-graphics"]
+```
+
+This is how Mokai built a real, working [SFML 3](https://github.com/SFML/SFML) target with its full transitive dependency chain — FreeType, HarfBuzz, SheenBidi, miniaudio, and the relevant X11 extension libraries — all expressed in SFML's own `mokai.toml`, invisible to the consuming project above.
 
 See [`docs/`](./docs) for the full configuration reference, including file groups, property groups, conditional compilation, hooks, and exports.
 
