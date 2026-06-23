@@ -1,0 +1,74 @@
+---
+title: Performance Tuning
+description: Learn how to optimize your manifests for maximum caching efficiency and fast compilation loops.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+Mokai is designed from the ground up for speed. However, an unoptimized configuration manifest can force the engine to bypass caches or execute redundant checks. Follow these guidelines to keep your project building instantly.
+
+---
+
+## Optimize Your Glob Rules
+
+Mokai features an optimized wildcard matching engine, but poor glob definitions can force the engine to recursively walk thousands of unrelated files.
+
+```toml
+[file_group.bad_sources]
+patterns = ["**/*.cpp"]
+
+[file_group.good_sources]
+patterns = ["src/core/**/*.cpp", "src/modules/*.cpp"]
+```
+
+<Callout type="warn" title="Globbing Scope">
+  Using broad recursive wildcards like `**/*.cpp` at the root forces Mokai to traverse your entire build sandbox, including object directories and internal cache tracking files. Always restrict patterns to isolated source directories.
+</Callout>
+
+### Best Practices for Directory Matching
+
+* **Isolate Asset Folders:** Never let a source code glob match patterns across asset or layout build directories like `build_output/`.
+* **Be Explicit with Deep Wildcards:** Use deep recursive matchers only within specific source trees, such as `src/renderer/**/`. This cuts down on unnecessary file system directory scans during the parsing pass.
+
+---
+
+## Cache Isolation via Property Groups
+
+Hardcoding flag variations directly onto flat targets forces target rebuilding whenever slight profile changes occur. Instead, segregate profile-dependent macro flags inside a `[property_group]`.
+
+```toml
+[property_group.diagnostics]
+condition = "config == debug && compiler == clang"
+defines = ["ENABLE_HEAVY_SANITIZERS=1"]
+flags = ["-fsanitize=address,undefined"]
+
+[target.engine_core]
+type = "static_library"
+sources = ["src/main.cpp"]
+properties = ["@diagnostics"]
+```
+
+When you toggle to a release profile (`mokai build --release`), Mokai's scheduling engine instantly flags the `@diagnostics` condition as invalid. It drops the flags safely from the translation units without needing to reset or wipe the unaffected, underlying base object caches.
+
+---
+
+## Designing Hook Sequences for Parallel Safety
+
+Mokai executes target compilation translation units in parallel across independent threads. If an external hook modifies files that other parts of the graph are actively reading, it can cause race conditions or broken builds.
+
+### Rules for Safe Hooks
+
+<Steps>
+<Step>
+### Avoid Target Collisions
+
+Do not assign a heavy file-modifying hook to a shared global state boundary like `pre_build` if it acts on files a specific sub-target requires. Use target-scoped triggers like `pre_target_build` or `on = "file_change"` paired with a strict target definition instead.
+</Step>
+
+<Step>
+### Output to Isolated Folders
+
+When generating code or compiling shaders via an external tool, write the output directly to separate generated asset folders rather than blending them straight back into your primary `src/` hierarchy. This guarantees that Mokai's source glob matches remain clean and predictable.
+</Step>
+</Steps>

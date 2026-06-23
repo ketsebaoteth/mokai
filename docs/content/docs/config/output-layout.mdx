@@ -1,0 +1,77 @@
+---
+title: Output Layout and Profiles
+description: Configure physical artifact generation boundaries, target subfolders, and compilation profiles.
+---
+
+Mokai manages binary generation through a centralized layout matrix. Instead of polluting your project root or requiring separate out-of-tree directory flags during compilation, output targets are explicitly mapped via the `[output]` block.
+
+---
+
+## The Output Block
+
+The root `[output]` table dictates where compiled translation units, static archives, and final executable binaries are stored on disk. 
+
+```toml
+[output]
+directory = "./build_output"
+
+[output.configs.debug]
+enabled = true
+subdir = "bin/debug"
+
+[output.configs.release]
+enabled = true
+subdir = "bin/release"
+```
+
+### Configuration Fields
+
+* **`directory`:** The absolute or relative root path where Mokai builds its internal object cache and final artifacts.
+* **`configs.<name>.enabled`:** A boolean toggle activating or deactivating a specific build profile pipeline.
+* **`configs.<name>.subdir`:** The subfolder inside the root output directory where final binaries for that configuration are linked.
+
+---
+
+## Active Output Profiles
+
+Mokai provides three built-in profiles to the condition grammar system via the `config` token: `debug`, `release`, and `profile`. 
+
+When you invoke a build via the command line, Mokai matches the configuration target and sets up the active environment state variables automatically.
+
+```bash
+# Compiles with config == "debug" and routes artifacts to ./build_output/bin/debug
+mokai build
+
+# Compiles with config == "release" and routes artifacts to ./build_output/bin/release
+mokai build --release
+```
+
+---
+
+## Profile-Specific Optimizations
+
+By pairing the `[output]` layout with target conditional modifiers (`flags_if`), you can configure optimal compiler parameters per profile without changing your physical folder structures or asset hooks.
+
+```toml
+[target.my_application]
+type = "executable"
+sources = ["src/main.cpp"]
+
+[[target.my_application.flags_if]]
+condition = "config == debug"
+flags = ["-g", "-O0", "-DDEBUG"]
+
+[[target.my_application.flags_if]]
+condition = "config == release"
+flags = ["-O3", "-march=native", "-fno-exceptions"]
+```
+
+---
+
+## Clean Architecture Integration
+
+When an external hook or tool runs, it can safely expect the output folder structures to exist. Mokai guarantees that the physical directory boundaries specified under `subdir` are verified, generated, and cleared of broken artifacts before the compiler toolchain is invoked.
+
+This keeps your project tree clean:
+* All temporary `.o` object files and content-hash tracking logs are sandboxed inside internal sub-directories within your specified output directory.
+* Final executable binaries and linked libraries are cleanly placed directly into the configured `subdir`.

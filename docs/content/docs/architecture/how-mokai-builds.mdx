@@ -1,0 +1,43 @@
+---
+title: How Mokai Builds
+description: Understand the underlying Directed Acyclic Graph (DAG) system and execution pipeline behind Mokai.
+---
+
+Unlike traditional build systems that interpret files procedurally from top to bottom, Mokai operates entirely on a **Directed Acyclic Graph (DAG)** model. When you invoke a build, your configuration files are treated as data declarations that describe dependencies, not scripts that execute instructions.
+
+Understanding this pipeline is key to designing modular, clean, and high-performance C++ projects.
+
+---
+
+## The Four Build Phases
+
+Every build invocation moves through four deterministic phases controlled by the core engine layers.
+
+
+
+### 1. The Parsing Phase (`mokai::Config`)
+The engine reads your root `mokai.toml` file using an in-process TOML parser. 
+* **Pre-Flight Validation:** Mokai immediately checks the `[compatibility]` block. If your host system uses an unsupported compiler or falls below the minimum required C++ standard version, execution halts here.
+* **Variable Extraction:** Global `[options]` and environment tokens (`os`, `compiler`, `config`) are gathered into an internal variable database.
+
+### 2. The Resolution Phase (The Lookup Loop)
+Mokai scans the declared `dependencies` array. If local or remote Git paths are found, it opens their respective sub-manifests recursively.
+* The engine matches target links via the 5-Step Lookup Loop.
+* Interface boundaries declared in downstream `[exports]` sections are aggregated, ensuring the parent project inherits public include directories and required preprocessor defines.
+
+### 3. The Scheduling Phase (`Graph` Ordering)
+Once all sub-manifests are completely resolved, the `Graph` layer builds a centralized dependency map.
+* **Topological Sorting:** Mokai calculates exactly which libraries must be compiled first. If target B depends on target A, target A is assigned a higher topological sorting rank.
+* **Cycle Detection:** The engine runs a path validation pass. If a cyclic reference is found (e.g., Target A depends on Target B, which loops back to depend on Target A), the execution halts instantly with a clear graph trace.
+* **Condition Expansion:** `_if` modifier blocks evaluate against the variable database, appending conditional sources or flags to the final compile matrix.
+
+### 4. The Execution Phase (Parallel Workers)
+With a valid graph scheduled, Mokai spins up parallel compile workers matched to your host machine's hardware thread count.
+* **Content-Hash Gating:** Before invoking a toolchain worker on a source file, Mokai checks the file's content hash against the cached build ledger. If the file and its dependent headers haven't changed, the translation unit step is bypassed.
+* **Direct Linking:** Valid object caches are compiled and linked directly into the subfolders specified by your `[output]` configuration.
+
+---
+
+## The Core Mental Model
+
+When writing a project manifest, remember: **You are defining relationships, not execution steps.** Because Mokai builds a concrete topological map of your code before compiling a single file, features like `[hook]` sequences, target dependencies, and property expansions will always execute in their mathematically correct order—no matter how massive your dependency tree grows.

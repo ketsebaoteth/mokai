@@ -1,0 +1,50 @@
+---
+title: Compatibility Matrix
+description: Define toolchain boundaries, gate compiler selections, and enforce C++ specification limits.
+---
+
+Mokai allows you to define strict environmental boundaries directly inside your manifest. Instead of letting a build fail halfway through with a cryptic compiler error, the `Graph` layer parses the `[compatibility]` block to validate the environment before starting any compilation loops.
+
+---
+
+## Language Specification Gating
+
+You can restrict your project to explicit C++ standard thresholds using language specification tracking metrics.
+
+```toml
+[compatibility]
+min_cpp_version = "c++20"
+preferred_cpp_version = "c++23"
+unsupported_cpp_versions = ["c++11", "c++14"]
+```
+
+### Validation Rules
+
+* **`min_cpp_version`:** Sets a strict lower boundary. If the host toolchain or the active `cpp_version` falls below this token, the engine aborts immediately.
+* **`preferred_cpp_version`:** Acts as a non-breaking recommendation metric. If the host matches this version, Mokai optimizes layout paths accordingly.
+* **`unsupported_cpp_versions`:** A definitive block list. Any explicit configuration matching an item in this array triggers a pre-flight validation error.
+
+---
+
+## Compiler Toolchain Filters
+
+To ensure stability across platform-specific features (such as Linux-exclusive low-level bindings or specific graphics API integrations), you can gate which compiler binaries the engine is allowed to invoke.
+
+```toml
+[compatibility.compilers]
+supported = ["clang", "gcc"]
+unsupported = ["msvc"]
+```
+
+If a developer attempts to drive the build using an unsupported compiler toolchain, Mokai drops out of execution before generating the dependency graph, providing a clean error message detailing the conflict.
+
+---
+
+## Pre-Flight Diagnostics Execution
+
+When `mokai::Config` passes parsed data to the `Graph` layer, compatibility checking runs as an atomic operation. 
+
+This tracking safety layer guarantees that:
+1. No local package checkouts or remote Git clones are executed if the driving compiler is unsupported.
+2. No intermediate `.o` object caches are dirtied or invalidated by an incompatible toolchain run.
+3. Errors point directly to your system's environmental mismatch, avoiding long, templated toolchain output.

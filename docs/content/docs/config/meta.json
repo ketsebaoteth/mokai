@@ -1,0 +1,8 @@
+{
+  "title": "Configuration & Setup",
+  "pages": [
+    "conditional-compilation",
+    "output-layout",
+    "compatibility-matrix"
+  ]
+}

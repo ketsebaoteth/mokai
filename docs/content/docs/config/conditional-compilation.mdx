@@ -1,0 +1,109 @@
+---
+title: Conditional Compilation
+description: Learn how to use Mokai's built-in condition grammar to dynamically adjust sources, flags, and macros.
+---
+
+Unlike build systems that rely on complex scripting languages, Mokai handles platform, toolchain, and custom configurations using declarative conditional blocks (`_if`) and a highly optimized condition grammar.
+Conditions are evaluated dynamically by the `Graph` layer during pipeline scheduling before compilation begins.
+
+---
+
+## The Condition Grammar
+
+Mokai parses conditional strings using a strict set of built-in environment keys, logical operators, and state variables.
+
+### Environment Keys
+
+When evaluating a condition string, the engine cross-references the following tokens:
+
+| Token | Data Type | Description / Valid Values |
+| :--- | :--- | :--- |
+| `os` | `string` | The host driving the execution (`"linux"`, `"windows"`, `"macos"`) |
+| `target_os` | `string` | The target architecture layout system being compiled for |
+| `compiler` | `string` | The active toolchain binary (`"clang"`, `"gcc"`, `"msvc"`) |
+| `compiler_version` | `semver` | Semantic versioning comparisons (e.g., `>= 11.0`, `< 19.20`) |
+| `arch` | `string` | Native processor profile (`"x86_64"`, `"arm64"`, `"x86"`) |
+| `target_type` | `string` | Active execution block state (`"executable"`, `"static_library"`, `"shared_library"`) |
+| `config` | `string` | Active output build profile (`"debug"`, `"release"`, `"profile"`) |
+| `options.<key>` | `boolean` | Custom boolean toggles configured in the global `[options]` block |
+
+### Supported Operators
+
+* **Logical Composition:** `&&` (AND), `||` (OR)
+* **Value Evaluation:** `==` (Equals), `!=` (Not Equals)
+* **Numeric/Version Comparisons:** `>=`, `<=`, `>`, `<`
+
+---
+
+## Global Options
+
+You can expose custom configuration flags to your build pipeline using the global `[options]` table. Option values **must strictly be booleans** (`true` or `false`). These populate Mokai's internal variable database.
+
+```toml
+[options]
+BUILD_VULKAN_BACKEND = true
+ENABLE_TELEMETRY = false
+```
+
+You can reference these options anywhere in a condition string using the `options.` prefix:
+
+```toml
+condition = "options.BUILD_VULKAN_BACKEND == true && os == linux"
+```
+
+---
+
+## Target Modifiers (`_if` Blocks)
+
+To apply properties dynamically to a specific target, append `_if` arrays-of-tables to your target matrix. You can use multiple `_if` statements on a single target; Mokai evaluates all of them and merges the valid tracks.
+
+### 1. Conditional Sources (`sources_if`)
+
+Use this to append hardware-specific backends or architecture-dependent files into your target translation units.
+
+```toml
+[[target.my_engine_core.sources_if]]
+condition = "options.BUILD_VULKAN_BACKEND == true"
+patterns = ["src/backend/vulkan.cpp", "src/backend/vulkan_pipeline.cpp"]
+```
+
+### 2. Conditional Flags (`flags_if`)
+
+Inject strict optimization metrics, profiling tools, or warnings depending on the active compiler toolchain.
+
+```toml
+[[target.my_engine_core.flags_if]]
+condition = "compiler == gcc && options.ENABLE_TELEMETRY == true"
+flags = ["-pg", "-fno-omit-frame-pointer"]
+```
+
+### 3. Conditional Properties (`properties_if`)
+
+Inject macros or export symbols depending on how a target is being consumed. For instance, defining API export symbols only when compiling a shared library:
+
+```toml
+[[target.my_engine_core.properties_if]]
+condition = "target_type == shared_library"
+defines = ["MOKAI_CORE_EXPORT=1"]
+```
+
+---
+
+## Reusable Property Groups
+
+If you have a complex matrix of flags and macros that multiple targets need to share conditionally, declare a `[property_group]`. These are stored inside the manifest and referenced inside a target using the `@` prefix.
+
+```toml
+[property_group.linux_strict_diagnostics]
+condition = "os == linux && compiler == clang"
+defines = ["MOKAI_LINUX_BUILD=1", "DEBUG_GPU"]
+flags = ["-Wall", "-Wextra", "-Werror"]
+
+[target.my_engine_core]
+type = "static_library"
+sources = ["src/main.cpp"]
+properties = ["@linux_strict_diagnostics"]
+```
+
+If the condition passes, the flags and defines are cleanly expanded into the target pipeline. If it fails, the reference resolves to an empty step, keeping your configuration predictable and fast.
+```

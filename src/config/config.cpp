@@ -116,7 +116,6 @@ Config::Config(std::string workingDir) {
     }
     return;
   }
-
   if (auto res = extractProjectData(); !res) {
     m_logger.Error("Manifest Validation Error: Failed to build project model "
                    "from 'mokai.toml'.");

@@ -1,0 +1,74 @@
+---
+title: Getting Started
+description: Learn how to install and start building C++ projects with Mokai.
+---
+
+Welcome to Mokai! Mokai is a fast, minimal build system, package manager, and developer toolkit for C++ designed to get you from an idea to a running binary with zero boilerplate.
+
+## Installation
+
+Mokai currently targets Linux for its core development and testing workflow. You can install it quickly using your system's package manager.
+
+### Using Pacman (Arch Linux)
+
+For Arch Linux and its derivatives, install Mokai via `pacman`:
+
+```bash
+sudo pacman -S mokai
+```
+
+### Using APT (Debian/Ubuntu)
+
+For Debian, Ubuntu, and related distributions, configure the repository and run:
+
+```bash
+sudo apt update
+sudo apt install mokai
+```
+
+---
+
+## Your First Project
+
+Once installed, you can scaffold and compile a brand-new C++ project in seconds using the interactive initializer.
+
+### 1. Initialize the Project
+
+Run `mokai create` followed by your desired project name:
+
+```bash
+mokai create myapp
+```
+
+This triggers an interactive setup where you can instantly choose your C++ standard target (up to `c++23`), select a skeleton blueprint, and initialize an empty Git tree.
+
+### 2. The Project Manifest
+
+Mokai replaces heavy scripting with a single, highly readable `mokai.toml` configuration file in your project root.
+
+```toml
+[project]
+name = "myapp"
+cpp_version = "c++20"
+
+[target.myapp]
+type = "executable"
+sources = ["./main.cpp"]
+```
+
+### 3. Build and Run
+
+There is no separate configuration or generator step. Mokai compiles and links your code directly in one unified loop:
+
+```bash
+cd myapp
+mokai build
+./build/debug/myapp
+```
+
+---
+
+## Next Steps
+
+Now that your workspace is ready, dive deeper into the core components of the Mokai ecosystem:
+

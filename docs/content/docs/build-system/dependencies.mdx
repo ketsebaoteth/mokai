@@ -1,0 +1,95 @@
+---
+title: Dependency Management
+description: Deep dive into Mokai's 5-step dependency lookup loop, local linking, and git package resolution.
+---
+
+Mokai manages complex dependency graphs natively in-process. By declaring dependencies in your manifest, the engine automatically calculates the topological build order, handles recursive sub-manifests, and blocks compilation loops if a cyclic dependency is detected.
+
+---
+
+## Declaring Dependencies
+
+Dependencies are tracked at two levels in your `mokai.toml`:
+1. **Package Routing (`[project.dependencies]`):** Tells Mokai where to find the source code.
+2. **Target Linking (`depends_on`):** Tells Mokai which libraries to link into a specific target.
+
+```toml
+[project]
+name = "my_game"
+cpp_version = "c++23"
+dependencies = [
+    "./local/physics_engine",
+    "git:https://github.com/fmtlib/fmt.git"
+]
+
+[target.my_game]
+type = "executable"
+sources = ["src/main.cpp"]
+depends_on = [
+    "fmt",                                     # Standard fallback match
+    "physics_engine:collision_detector"        # Direct package-to-target linkage
+]
+```
+
+---
+
+## The 5-Step Lookup Loop
+
+When the `Graph` layer evaluates a string token inside a target's `depends_on` array, it runs a deterministic 5-step lookup loop via `mokai::Config`. The first layer to successfully resolve the coordinate terminates the search.
+
+<Steps>
+<Step>
+### Explicit Package Target (`package:target`)
+
+If the string contains a `:` delimiter (e.g., `"sfml:sfml-graphics"`), the engine bypasses global searches and goes directly into the manifest of the specified package dependency, locating the exact target definition.
+</Step>
+
+<Step>
+### Exported Profile (`package/profile`)
+
+If the string contains a `/` delimiter (e.g., `"external_dep/core_profile"`), Mokai looks up the target package's `[exports.profile.<name>]` block. It then imports the entire cluster of targets mapped to that profile at once.
+</Step>
+
+<Step>
+### Local Manifest Match
+
+The engine searches within the *current* `mokai.toml` file for a target name matching the token. This is used for linking internal static libraries to your main executable.
+</Step>
+
+<Step>
+### Global Unique Target Sweep
+
+If no local match is found, Mokai performs an ambient sweep across all gathered and parsed sub-manifests in the current graph workspace to locate a unique target matching the name.
+</Step>
+
+<Step>
+### Package Name Fallback
+
+If the token matches the root name of a declared dependency package, the engine falls back to reading that dependency's `[exports]` layer, automatically linking against all targets registered in its `default_targets` array.
+</Step>
+</Steps>
+
+---
+
+## Distribution Layer (`[exports]`)
+
+When you create a library intended for other projects to consume, you define how it behaves downstream inside the `[exports]` block. This encapsulates your public interface so consumers don't have to guess paths or compiler flags.
+
+```toml
+[exports]
+default_targets = ["my_engine_core"]
+include_dirs = ["include/public"]
+defines_required = ["USING_MOKAI_ENGINE=1"]
+defines_optional = ["MOKAI_ENABLE_ANALYTICS=1"]
+
+# Target clusters accessible via: depends_on = ["package/headless_runtime"]
+[exports.profile.headless_runtime]
+targets = ["my_engine_core"]
+
+[exports.profile.full_suite]
+targets = ["my_engine_core", "editor_companion_target"]
+```
+
+* **`default_targets`:** The fallback targets linked when a consumer relies on Step 5.
+* **`include_dirs`:** Automatically appended to the compiler lookup paths of any target linking this package.
+* **`defines_required`:** Preprocessor macros that are strictly injected into the consumer's translation units.

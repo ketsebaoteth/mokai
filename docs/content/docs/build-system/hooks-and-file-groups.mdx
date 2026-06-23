@@ -1,0 +1,86 @@
+---
+title: Hooks and File Groups
+description: Learn how to batch file patterns and intercept Mokai's build lifecycle using file-change hashing and target boundaries.
+---
+
+Mokai relies on a declarative configuration layout rather than imperative scripts. To support tasks like shader compilation, asset packaging, or code generation, Mokai provides two closely linked systems: **File Groups** and **Lifecycle Interceptor Hooks**.
+
+---
+
+## File Group Aliasing
+
+File Groups allow you to match complex directory structures using wildcards and assign them to a clean, reusable token. These groups are stored internally in the engine's compilation vectors and can be safely referenced across multiple targets or hooks.
+
+To define a group, use the `[file_group.<name>]` syntax:
+
+```toml
+[file_group.render_sources]
+patterns = ["src/renderer/*.cpp", "src/renderer/vulkan/**/*.cpp"]
+
+[file_group.shader_assets]
+patterns = ["shaders/**/*.spv"]
+```
+
+Mokai's underlying glob engine natively supports:
+* `*` — Matches files in a single directory level.
+* `**` — Recursively walks down nested directories.
+* `{a,b}` — Brace expansion for matching specific extensions or names (e.g., `src/**/*.{h,cpp}`).
+
+---
+
+## Lifecycle Interceptor Hooks
+
+Hooks allow you to register external shell pathways that the `Graph` layer executes under explicit execution boundaries. Each hook spins up an independent shell execution sequence using a string path passed directly to the native system.
+
+```toml
+[hook.shader_compiler]
+on = "file_change"
+pattern = "shaders/**/*.glsl"
+run = "./scripts/compile_shaders.sh"
+```
+
+### Hook Configuration Properties
+
+| Property | Type | Requirement | Description |
+| :--- | :--- | :--- | :--- |
+| `on` | `string` | **Mandatory** | The exact pipeline state where the execution triggers. |
+| `run` | `string` | **Mandatory** | The system command sequence or script path to run via `std::system`. |
+| `target` | `string` | *Optional* | Restricts execution so it only runs relative to a specific target block. |
+| `pattern` | `string` | *Optional* | A file glob pattern tracked for dirty content-hashing checks. Required for `file_change`. |
+
+---
+
+## Execution Boundaries (`on`)
+
+The engine tracks state changes across the build timeline. You can wire a hook into five core lifecycle boundaries:
+
+| State Trigger | Scope | Description |
+| :--- | :--- | :--- |
+| `pre_build` | Global | Triggers immediately when you invoke `mokai build`, before any manifests are validated or the graph is scheduled. |
+| `pre_target_build` | Target-Scoped | Triggers right before a specific target begins compiling its first translation unit. Requires the `target` field. |
+| `post_target_build` | Target-Scoped | Triggers immediately after a target successfully links its final binary artifact. Requires the `target` field. |
+| `post_build` | Global | Triggers at the absolute end of execution, only if the entire dependency graph compiled and linked with zero errors. |
+| `file_change` | Asset-Scoped | Triggers dynamically if any file matching the `pattern` field exhibits a modified content-hash timestamp since the last build. |
+
+---
+
+## Incremental Asset Execution
+
+Using a hook with `on = "file_change"` ensures your build loop remains performant. Instead of spawning shell processes blindly on every build invocation, Mokai evaluates the tracking state of files matching the `pattern` attribute first.
+
+If the files are untouched, Mokai bypasses the script execution entirely. If a modification is found, the engine executes the script before resuming the source compilation graph.
+
+```toml
+[project]
+name = "vulkan_renderer"
+cpp_version = "c++23"
+
+[hook.compile_glsl_shaders]
+on = "file_change"
+pattern = "shaders/**/*.vert"
+run = "glslc shaders/main.vert -o build_output/shaders/main.vert.spv"
+
+[target.renderer_core]
+type = "executable"
+sources = ["src/main.cpp"]
+```
