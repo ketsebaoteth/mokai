@@ -9,8 +9,11 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <sys/wait.h> // POSIX/Linux process macro status decoding
 #include <vector>
+
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <sys/wait.h> // POSIX/Linux process macro status decoding
+#endif
 
 namespace fs = std::filesystem;
 
@@ -181,8 +184,6 @@ std::expected<void, std::string> Config::parseConfig() {
 }
 
 std::expected<void, std::string> Config::extractProjectData() {
-  // Safe extraction strategy utilizing direct value mappings instead of broken
-  // compile-time traits
   auto extract_string_array = [](auto &&node_view,
                                  std::vector<std::string> &dest) {
     if (auto *arr = node_view.as_array()) {
@@ -308,7 +309,6 @@ std::expected<void, std::string> Config::extractProjectData() {
           }
 
         } else {
-          // Central Mokai Package Registry Routing Subsystem
           std::string pkgName = depStr;
           std::string pkgVersionSpec = "";
           size_t versionDelim = depStr.find('@');
@@ -321,7 +321,6 @@ std::expected<void, std::string> Config::extractProjectData() {
           fs::path homePath = homeEnv ? fs::path(homeEnv) : fs::current_path();
           fs::path registryDir = homePath / ".mokai" / "registry";
 
-          // Sync centralized configuration mapping index repos
           if (!fs::exists(registryDir)) {
             m_logger.Info(
                 "Package Router: Syncing central registry context mappings...");
@@ -373,7 +372,6 @@ std::expected<void, std::string> Config::extractProjectData() {
                       matchedRecipePath = cPath;
                       targetGitRef = gitRef;
                     }
-                    // Accurate SemVer Range Verification
                     if (!pkgVersionSpec.empty() &&
                         matchesRange(pkgVersionSpec, vRange)) {
                       matchedRecipePath = cPath;
@@ -389,7 +387,6 @@ std::expected<void, std::string> Config::extractProjectData() {
                 std::string targetPkgBuildDir = "./build/external/" + pkgName;
                 fs::create_directories("./build/external");
 
-                // Smart Fetching and State Verification Sequence
                 if (!fs::exists(targetPkgBuildDir)) {
                   m_logger.Info(
                       "Package Router: Downloading source files for [" +
@@ -417,8 +414,6 @@ std::expected<void, std::string> Config::extractProjectData() {
                   }
                 }
 
-                // Precision State Shifting: Check out specified version target
-                // context safely
                 if (!targetGitRef.empty()) {
                   m_logger.Info("Package Router: Pointing target branch layout "
                                 "tracking ref to -> " +
@@ -471,8 +466,6 @@ std::expected<void, std::string> Config::extractProjectData() {
 
   m_manifest.project = std::move(metadata);
 
-  // Parsing sub-tables (options, compatibility, groups, targets, hooks,
-  // exports, outputs)
   if (auto *options_table = m_config_toml["options"].as_table()) {
     for (auto &&[key, value] : *options_table) {
       if (auto val = value.value<bool>()) {
@@ -538,7 +531,6 @@ std::expected<void, std::string> Config::extractProjectData() {
                                  target.name);
         }
 
-        // Extracted cleanly now that extract_string_array works properly
         extract_string_array((*inner_table)["sources"], target.sources);
         extract_string_array((*inner_table)["include_dirs"],
                              target.include_dirs);
@@ -729,8 +721,7 @@ bool Config::runTarget(const std::string &targetName) {
   const Target *matchedTarget = nullptr;
   for (const auto &t : m_manifest.targets) {
     if (t.name == targetName) {
-      matchedTarget =
-          &t; // Reference assignment prevents structure copying overhead
+      matchedTarget = &t;
       break;
     }
   }
@@ -784,13 +775,66 @@ bool Config::runTarget(const std::string &targetName) {
     return false;
   }
 
-  // POSIX macro decoding for accurate target exit states on Linux
+#if defined(_WIN32) || defined(_WIN64)
+  // Windows returns raw exit codes directly from std::system
+  return exitStatus == 0;
+#else
+  // POSIX macro decoding for accurate target exit states on Linux/macOS
   return WIFEXITED(exitStatus) && WEXITSTATUS(exitStatus) == 0;
+#endif
 }
 
 bool Config::isGitDep(std::string &str) { return str.starts_with("git:"); }
 bool Config::isLocDep(std::string &str) {
   return str.starts_with("./") || str.starts_with("../");
+}
+
+bool Config::checkIsFileAndExists(const std::string &path) {
+  return fs::exists(path) && fs::is_regular_file(path);
+}
+
+bool Config::checkIsFolderAndExists(const std::string &path) {
+  return fs::exists(path) && fs::is_directory(path);
+}
+
+FuzzyFindResult Config::fuzzyFindCloseFile(std::string &path) {
+  fs::path p(path);
+  fs::path parent = p.has_parent_path() ? p.parent_path() : fs::current_path();
+  std::string filename = p.filename().string();
+
+  if (!fs::exists(parent))
+    return {false, ""};
+
+  for (const auto &entry : fs::directory_iterator(parent)) {
+    if (entry.is_regular_file()) {
+      std::string entryName = entry.path().filename().string();
+      if (entryName.size() >= 3 && filename.size() >= 3 &&
+          entryName.substr(0, 3) == filename.substr(0, 3)) {
+        return {true, entry.path().string()};
+      }
+    }
+  }
+  return {false, ""};
+}
+
+FuzzyFindResult Config::fuzzyFindCloseFolder(std::string &path) {
+  fs::path p(path);
+  fs::path parent = p.has_parent_path() ? p.parent_path() : fs::current_path();
+  std::string folderName = p.filename().string();
+
+  if (!fs::exists(parent))
+    return {false, ""};
+
+  for (const auto &entry : fs::directory_iterator(parent)) {
+    if (entry.is_directory()) {
+      std::string entryName = entry.path().filename().string();
+      if (entryName.size() >= 3 && folderName.size() >= 3 &&
+          entryName.substr(0, 3) == folderName.substr(0, 3)) {
+        return {true, entry.path().string()};
+      }
+    }
+  }
+  return {false, ""};
 }
 
 } // namespace mokai

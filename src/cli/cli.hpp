@@ -1,4 +1,5 @@
 #pragma once
+#include "core/os.hpp"
 #include "exp.hpp"
 #include "log/log.h"
 #include <expected>
@@ -43,6 +44,13 @@ struct GlobalOptions {
   int job_count = 0;
   std::string target_filter = "";
   bool force_rebuild = false;
+
+  // Cross-Platform Mapping Adjustments
+  Platform target_platform = OS::GetCurrentPlatform();
+
+  // Custom compiler/toolchain flag overrides configured during CLI ingestion
+  // loops
+  std::vector<std::string> user_compiler_flags;
 };
 
 // based on POSIX standard

@@ -25,6 +25,7 @@ struct Toolchain {
   std::string cpp_compiler;
   std::string c_compiler;
   std::string archiver;
+  bool is_msvc = false;
 };
 
 static Toolchain discoverToolchain() {
@@ -32,11 +33,21 @@ static Toolchain discoverToolchain() {
   static bool discovered = false;
 
   if (!discovered) {
-    if (std::system("which clang++ > /dev/null 2>&1") == 0) {
-      cached_toolchain = {"clang++", "clang", "llvm-ar"};
+#if defined(_WIN32) || defined(_WIN64)
+    if (std::system("where cl > NUL 2>&1") == 0) {
+      cached_toolchain = {"cl", "cl", "lib", true};
+    } else if (std::system("where clang++ > NUL 2>&1") == 0) {
+      cached_toolchain = {"clang++", "clang", "llvm-ar", false};
     } else {
-      cached_toolchain = {"g++", "gcc", "ar"};
+      cached_toolchain = {"g++", "gcc", "ar", false};
     }
+#else
+    if (std::system("which clang++ > /dev/null 2>&1") == 0) {
+      cached_toolchain = {"clang++", "clang", "llvm-ar", false};
+    } else {
+      cached_toolchain = {"g++", "gcc", "ar", false};
+    }
+#endif
     discovered = true;
   }
   return cached_toolchain;
@@ -460,6 +471,8 @@ void Graph::matchGlobPattern(const std::string &pattern,
     target_pattern = target_pattern.substr(2);
   }
 
+  std::replace(target_pattern.begin(), target_pattern.end(), '\\', '/');
+
   std::string regex_str = "^";
   bool is_recursive = (target_pattern.find("**") != std::string::npos);
 
@@ -488,22 +501,24 @@ void Graph::matchGlobPattern(const std::string &pattern,
 
   std::string search_root = base_dir.empty() ? "." : base_dir;
 
+  auto normalize_and_add = [&](const fs::path &path) {
+    std::string rel_path = fs::relative(path, search_root).string();
+    std::replace(rel_path.begin(), rel_path.end(), '\\', '/');
+    if (std::regex_match(rel_path, filter)) {
+      matches.push_back(fs::path(path).lexically_normal().string());
+    }
+  };
+
   if (is_recursive) {
     for (const auto &entry : fs::recursive_directory_iterator(search_root)) {
       if (fs::is_regular_file(entry)) {
-        std::string rel_path = fs::relative(entry.path(), search_root).string();
-        if (std::regex_match(rel_path, filter)) {
-          matches.push_back(fs::path(entry.path()).lexically_normal().string());
-        }
+        normalize_and_add(entry.path());
       }
     }
   } else {
     for (const auto &entry : fs::directory_iterator(search_root)) {
       if (fs::is_regular_file(entry)) {
-        std::string rel_path = fs::relative(entry.path(), search_root).string();
-        if (std::regex_match(rel_path, filter)) {
-          matches.push_back(fs::path(entry.path()).lexically_normal().string());
-        }
+        normalize_and_add(entry.path());
       }
     }
   }
@@ -528,12 +543,11 @@ bool Graph::evaluateConditionExpression(
   if (std::regex_search(condition, comp_match, compiler_regex)) {
     std::string expected_compiler = comp_match[1].str();
     Toolchain tc = discoverToolchain();
-    std::string active_compiler =
-        (tc.cpp_compiler == "clang++") ? "clang" : "gcc";
-
-#ifdef _MSC_VER
-    active_compiler = "msvc";
-#endif
+    std::string active_compiler = "gcc";
+    if (tc.is_msvc)
+      active_compiler = "msvc";
+    else if (tc.cpp_compiler == "clang++")
+      active_compiler = "clang";
 
     return (active_compiler == expected_compiler);
   }
@@ -625,7 +639,10 @@ void Graph::executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
     m_logger.Info("Executing structural Hook [" + hook.name +
                   "] via context phase '" + trigger_str + "'");
 
-    std::string context_path = "/tmp/mokai_hook_ctx_" + hook.name + ".json";
+    fs::path temp_dir = fs::temp_directory_path();
+    fs::path context_path =
+        temp_dir / ("mokai_hook_ctx_" + hook.name + ".json");
+
     std::ofstream ctx_file(context_path);
     ctx_file << "{\n"
              << "  \"trigger\": \"" << escapeJsonString(trigger_str) << "\",\n"
@@ -635,7 +652,14 @@ void Graph::executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
              << "}\n";
     ctx_file.close();
 
-    std::string command = "MOKAI_CONTEXT_FILE=" + context_path + " " + hook.run;
+    std::string command;
+#if defined(_WIN32) || defined(_WIN64)
+    command =
+        "set MOKAI_CONTEXT_FILE=" + context_path.string() + " && " + hook.run;
+#else
+    command = "MOKAI_CONTEXT_FILE=" + context_path.string() + " " + hook.run;
+#endif
+
     int hook_result = std::system(command.c_str());
     if (hook_result != 0) {
       m_logger.Warn("Hook warning: lifecycle binary execution [" + hook.name +
@@ -658,8 +682,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     if (!qt)
       continue;
 
-    // Filter target pipeline checks at setup time if restricted sub-target
-    // optimization filters exist
     if (!m_options.target_filter.empty() &&
         qt->target.name != m_options.target_filter) {
       continue;
@@ -681,12 +703,13 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     }
   }
 
+  // FIXED CORE RE-DEFINITION BUG: Initialized here, used globally down to
+  // telemetry summary.
   auto build_start_time = std::chrono::high_resolution_clock::now();
 
   Toolchain toolchain = discoverToolchain();
   std::string output_root = "./build";
 
-  // Flag Knobs Refactoring Injection
   std::string sub_profile =
       (m_options.profile == BuildProfile::Release) ? "release" : "debug";
   std::string target_build_dir = output_root + "/" + sub_profile;
@@ -706,8 +729,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   std::unordered_map<std::string, std::pair<std::string, std::string>>
       state_cache;
 
-  // Bypasses localized token parsing entirely when a user sets a --clean
-  // compilation trigger flag
   if (fs::exists(cache_path) && !m_options.force_rebuild) {
     std::ifstream cache_file(cache_path);
     std::string line, f_path, f_time, f_hash;
@@ -738,7 +759,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
     const Target &target = qt->target;
 
-    // Isolate graph optimization maps to specific user target directives
     if (!m_options.target_filter.empty() &&
         target.name != m_options.target_filter) {
       if (m_options.verbosity == Verbosity::Verbose) {
@@ -815,20 +835,22 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     }
 
     std::stringstream flags_stream;
-    flags_stream << "-fPIC ";
-
-    // Append standard toolchain parameters explicitly based on Profile
-    // selections
-    if (m_options.profile == BuildProfile::Release) {
-      flags_stream << "-O3 -DNDEBUG ";
+    if (!toolchain.is_msvc) {
+      flags_stream << "-fPIC ";
+      if (m_options.profile == BuildProfile::Release) {
+        flags_stream << "-O3 -DNDEBUG ";
+      } else {
+        flags_stream << "-g -O0 ";
+      }
+      if (m_options.verbosity == Verbosity::Verbose) {
+        flags_stream << "-v ";
+      }
     } else {
-      flags_stream << "-g -O0 ";
-    }
-
-    // Pass compiler flags straight down to the underlying compiler when
-    // requested by the CLI
-    if (m_options.verbosity == Verbosity::Verbose) {
-      flags_stream << "-v ";
+      if (m_options.profile == BuildProfile::Release) {
+        flags_stream << "/O2 /DNDEBUG /EHsc ";
+      } else {
+        flags_stream << "/Zi /Od /EHsc ";
+      }
     }
 
     auto eval_cb = [this, &target, &qt](const std::string &cond) {
@@ -843,17 +865,20 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     std::string base =
         qt->manifest->base_dir.empty() ? "." : qt->manifest->base_dir;
 
+    char inc_prefix = toolchain.is_msvc ? '/' : '-';
     for (const auto &inc : target.include_dirs) {
       fs::path inc_path(inc);
       if (inc_path.is_relative())
         inc_path = fs::path(base) / inc_path;
-      flags_stream << "-I" << inc_path.lexically_normal().string() << " ";
+      flags_stream << inc_prefix << "I" << inc_path.lexically_normal().string()
+                   << " ";
     }
     for (const auto &inc : qt->manifest->project.include_dirs) {
       fs::path inc_path(inc);
       if (inc_path.is_relative())
         inc_path = fs::path(base) / inc_path;
-      flags_stream << "-I" << inc_path.lexically_normal().string() << " ";
+      flags_stream << inc_prefix << "I" << inc_path.lexically_normal().string()
+                   << " ";
     }
 
     auto transitive_deps = getTransitiveDependencies(qualified_name);
@@ -875,7 +900,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
             if (!seen_includes.contains(norm_inc)) {
               seen_includes.insert(norm_inc);
-              flags_stream << "-I" << norm_inc << " ";
+              flags_stream << inc_prefix << "I" << norm_inc << " ";
             }
           }
         }
@@ -895,12 +920,12 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
             }
             if (group_allowed) {
               for (const auto &def : pg.defines)
-                flags_stream << "-D" << def << " ";
+                flags_stream << (toolchain.is_msvc ? "/D" : "-D") << def << " ";
             }
           }
         }
       } else {
-        flags_stream << "-D" << prop_ref << " ";
+        flags_stream << (toolchain.is_msvc ? "/D" : "-D") << prop_ref << " ";
       }
     }
 
@@ -910,8 +935,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     std::atomic<bool> compilation_failed(false);
     std::atomic<bool> target_requires_linkage(false);
 
-    // Job Throttling Engine: defaults to standard thread count calculations
-    // unless explicitly throttled by user
     unsigned int worker_count =
         (m_options.job_count > 0)
             ? static_cast<unsigned int>(m_options.job_count)
@@ -939,19 +962,24 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
               is_c_file ? toolchain.c_compiler : toolchain.cpp_compiler;
           std::string final_std_flag;
 
-          if (is_c_file) {
-            final_std_flag = (raw_manifest_std.empty() ||
-                              raw_manifest_std.rfind("c++", 0) == 0)
-                                 ? "-std=c11"
-                                 : "-std=" + raw_manifest_std;
+          if (toolchain.is_msvc) {
+            final_std_flag = is_c_file ? "/std:c11" : "/std:c++20";
           } else {
-            final_std_flag = (raw_manifest_std.empty() ||
-                              raw_manifest_std.rfind("c++", 0) != 0)
-                                 ? "-std=c++23"
-                                 : "-std=" + raw_manifest_std;
+            if (is_c_file) {
+              final_std_flag = (raw_manifest_std.empty() ||
+                                raw_manifest_std.rfind("c++", 0) == 0)
+                                   ? "-std=c11"
+                                   : "-std=" + raw_manifest_std;
+            } else {
+              final_std_flag = (raw_manifest_std.empty() ||
+                                raw_manifest_std.rfind("c++", 0) != 0)
+                                   ? "-std=c++23"
+                                   : "-std=" + raw_manifest_std;
+            }
           }
 
-          std::string object_filename = src_path.filename().string() + ".o";
+          std::string object_filename = src_path.filename().string() +
+                                        (toolchain.is_msvc ? ".obj" : ".o");
           fs::path out_obj_path =
               fs::path(object_cache_dir) / target.name / object_filename;
           fs::create_directories(out_obj_path.parent_path());
@@ -975,9 +1003,14 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
             total_cache_misses++;
             target_requires_linkage = true;
 
-            std::string command = chosen_compiler + " " + final_std_flag + " " +
-                                  shared_user_flags + " -c " + src + " -o " +
-                                  obj_file;
+            std::string command;
+            if (toolchain.is_msvc) {
+              command = chosen_compiler + " " + final_std_flag + " " +
+                        shared_user_flags + " /c " + src + " /Fo" + obj_file;
+            } else {
+              command = chosen_compiler + " " + final_std_flag + " " +
+                        shared_user_flags + " -c " + src + " -o " + obj_file;
+            }
 
             {
               std::lock_guard<std::mutex> lock(compilation_db_mutex);
@@ -1016,6 +1049,23 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     }
 
     std::string target_output_file;
+#if defined(_WIN32) || defined(_WIN64)
+    if (target.type == TargetType::Executable) {
+      target_output_file = target_build_dir + "/" + target.name + ".exe";
+    } else if (target.type == TargetType::StaticLibrary) {
+      target_output_file = target_build_dir + "/" + target.name + ".lib";
+    } else if (target.type == TargetType::SharedLibrary) {
+      target_output_file = target_build_dir + "/" + target.name + ".dll";
+    }
+#elif defined(__APPLE__)
+    if (target.type == TargetType::Executable) {
+      target_output_file = target_build_dir + "/" + target.name;
+    } else if (target.type == TargetType::StaticLibrary) {
+      target_output_file = target_build_dir + "/lib" + target.name + ".a";
+    } else if (target.type == TargetType::SharedLibrary) {
+      target_output_file = target_build_dir + "/lib" + target.name + ".dylib";
+    }
+#else
     if (target.type == TargetType::Executable) {
       target_output_file = target_build_dir + "/" + target.name;
     } else if (target.type == TargetType::StaticLibrary) {
@@ -1023,39 +1073,60 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     } else if (target.type == TargetType::SharedLibrary) {
       target_output_file = target_build_dir + "/lib" + target.name + ".so";
     }
+#endif
 
     if (target_requires_linkage || !fs::exists(target_output_file)) {
       std::string link_cmd;
       if (target.type == TargetType::StaticLibrary) {
-        link_cmd = toolchain.archiver + " rcs " + target_output_file;
+        if (toolchain.is_msvc) {
+          link_cmd = toolchain.archiver + " /OUT:" + target_output_file;
+        } else {
+          link_cmd = toolchain.archiver + " rcs " + target_output_file;
+        }
         for (const auto &obj : object_files) {
           link_cmd += " " + obj;
         }
       } else {
-        link_cmd = toolchain.cpp_compiler + " ";
-        if (target.type == TargetType::SharedLibrary) {
-          link_cmd += "-shared ";
-        }
-
-        // Pass Verbosity tags directly to linkage phase when debugging deep
-        // crashes
-        if (m_options.verbosity == Verbosity::Verbose) {
-          link_cmd += "-v ";
+        if (toolchain.is_msvc) {
+          link_cmd = "link /OUT:" + target_output_file + " ";
+          if (target.type == TargetType::SharedLibrary) {
+            link_cmd += "/DLL ";
+          }
+        } else {
+          link_cmd = toolchain.cpp_compiler + " ";
+          if (target.type == TargetType::SharedLibrary) {
+            link_cmd += "-shared ";
+          }
+          if (m_options.verbosity == Verbosity::Verbose) {
+            link_cmd += "-v ";
+          }
         }
 
         for (const auto &obj : object_files) {
           link_cmd += " " + obj;
         }
-        link_cmd += " -o " + target_output_file + " ";
 
-        for (const auto &dep_name : transitive_deps) {
-          if (built_library_map.count(dep_name)) {
-            link_cmd += " " + built_library_map[dep_name] + " ";
+        if (toolchain.is_msvc) {
+          for (const auto &dep_name : transitive_deps) {
+            if (built_library_map.count(dep_name)) {
+              fs::path lib_path = built_library_map[dep_name];
+              link_cmd +=
+                  " " + lib_path.replace_extension(".lib").string() + " ";
+            }
           }
-        }
-
-        for (const auto &sys_lib : target.system_libs) {
-          link_cmd += " -l" + sys_lib + " ";
+          for (const auto &sys_lib : target.system_libs) {
+            link_cmd += " " + sys_lib + ".lib ";
+          }
+        } else {
+          link_cmd += " -o " + target_output_file + " ";
+          for (const auto &dep_name : transitive_deps) {
+            if (built_library_map.count(dep_name)) {
+              link_cmd += " " + built_library_map[dep_name] + " ";
+            }
+          }
+          for (const auto &sys_lib : target.system_libs) {
+            link_cmd += " -l" + sys_lib + " ";
+          }
         }
       }
 
@@ -1111,12 +1182,13 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
                             build_end_time - build_start_time)
                             .count();
 
+  // FIXED: Purged pure std::cout structures. Telemetry output streams strictly
+  // via log routing variants.
   if (m_options.verbosity != Verbosity::Quiet) {
-    std::cout << Style::Green << "\n[mokai] Build completed successfully in "
-              << total_duration << "ms.\n";
-    std::cout << "[mokai] Cache Summary: " << Style::Green << total_cache_hits
-              << " hits, " << Style::Reset << total_cache_misses
-              << " misses.\n";
+    m_logger.Success("Build completed successfully in " +
+                     std::to_string(total_duration) + "ms.");
+    m_logger.Info("Cache Summary: " + std::to_string(total_cache_hits) +
+                  " hits, " + std::to_string(total_cache_misses) + " misses.");
   }
 
   return true;

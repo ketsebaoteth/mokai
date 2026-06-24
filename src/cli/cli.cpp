@@ -1,5 +1,6 @@
 #include "cli.hpp"
 #include "config/config.hpp"
+#include "core/os.hpp" // Integrated platform hooks
 #include "graph/graph.hpp"
 #include "log/log.h"
 #include <algorithm>
@@ -12,10 +13,18 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <termios.h>
-#include <unistd.h>
 #include <variant>
 #include <vector>
+
+// Platform conditional header mapping for safe raw terminal ingestion
+#if defined(_WIN32) || defined(_WIN64)
+#include <conio.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -223,8 +232,9 @@ Cli::handleBuild(const std::vector<std::string> &args) {
   workingDir = fs::absolute(workingDir).lexically_normal();
 
   if (m_options.verbosity != Verbosity::Quiet) {
-    std::println("{}{}Initializing build target pipeline...{}", Style::Cyan,
-                 Style::Arrow, Style::Reset);
+    std::println("{}{}Initializing build target pipeline ({})...{}",
+                 Style::Cyan, Style::Arrow, OS::GetPlatformName(),
+                 Style::Reset);
   }
 
   Config config(workingDir.string());
@@ -258,18 +268,18 @@ static size_t promptChoice(const std::string &title,
 
   size_t current_idx = default_idx;
   const size_t max_visible = 5;
+  bool selecting = true;
+  bool first_render = true;
 
+#if !defined(_WIN32) && !defined(_WIN64)
   struct termios orig_termios;
   tcgetattr(STDIN_FILENO, &orig_termios);
-
   struct termios raw = orig_termios;
   raw.c_lflag &= ~(ICANON | ECHO);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+#endif
 
   std::print("\033[?25l");
-
-  bool selecting = true;
-  bool first_render = true;
 
   while (selecting) {
     size_t start_idx = 0;
@@ -304,6 +314,27 @@ static size_t promptChoice(const std::string &title,
     std::println("){}", Style::Reset);
     std::fflush(stdout);
 
+#if defined(_WIN32) || defined(_WIN64)
+    int ch = _getch();
+    if (ch == 0 || ch == 0xE0) { // Windows extended key escape prefix
+      ch = _getch();
+      if (ch == 72 && current_idx > 0) { // Up Arrow
+        current_idx--;
+      } else if (ch == 80 && current_idx < options.size() - 1) { // Down Arrow
+        current_idx++;
+      }
+    } else if (ch == '\r' || ch == '\n') {
+      selecting = false;
+    } else if (ch == 'k' && current_idx > 0) {
+      current_idx--;
+    } else if (ch == 'j' && current_idx < options.size() - 1) {
+      current_idx++;
+    } else if (ch == 3) { // Ctrl+C interrupt handling
+      std::print("\033[?25h");
+      std::println("{}\nAborted via interrupt.{}", Style::Red, Style::Reset);
+      std::exit(130);
+    }
+#else
     char ch;
     if (read(STDIN_FILENO, &ch, 1) == 1) {
       if (ch == '\n' || ch == '\r') {
@@ -332,10 +363,13 @@ static size_t promptChoice(const std::string &title,
         std::exit(130);
       }
     }
+#endif
   }
 
   std::print("\033[?25h");
+#if !defined(_WIN32) && !defined(_WIN64)
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+#endif
 
   size_t lines_to_clear = std::min(options.size(), max_visible) + 2;
   for (size_t i = 0; i < lines_to_clear; ++i) {
@@ -385,9 +419,8 @@ Cli::handlePackageAdd(const std::vector<std::string> &args) {
     std::println("{}──────────────────────────────────────────────────\n{}",
                  Style::Dim, Style::Reset);
 
-    const char *homeEnv = std::getenv("HOME");
-    fs::path homePath = homeEnv ? fs::path(homeEnv) : fs::current_path();
-    fs::path registryDir = homePath / ".mokai" / "registry";
+    fs::path registryDir =
+        OS::GetTemporaryDirectory().parent_path() / ".mokai" / "registry";
 
     if (!fs::exists(registryDir) || fs::is_empty(registryDir)) {
       std::println("{}{}Central configuration map is uninitialized. Run a "
@@ -629,9 +662,8 @@ Cli::handleCreateProject(const std::vector<std::string> &args) {
   }
 
   if (init_git) {
-    std::string git_cmd =
-        "git init " + target_dir.string() + " > /dev/null 2>&1";
-    std::system(git_cmd.c_str());
+    std::unordered_map<std::string, std::string> clean_env;
+    OS::ExecuteCommand("git init " + target_dir.string(), clean_env);
   }
 
   std::println("\r{}{}Project setup initialized perfectly!{}", Style::Green,
