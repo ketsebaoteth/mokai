@@ -1,0 +1,64 @@
+---
+title: Build Profiles & Environment Geometry
+description: Learn how mokai handles build profiles, environment isolation, parallel execution, and caching behaviors.
+---
+
+
+## Configuration & Flag Matrix
+
+When you execute a build sequence, the engine accepts a variety of flags that instantly alter compilation geometry, threading thresholds, and output routing.
+
+| Flag | Supported Subcommands | Purpose | Operational Result |
+| :--- | :--- | :--- | :--- |
+| `--release` | `Build` | Switches to production geometry | Sets `-O3 -DNDEBUG`, paths output to `./build/release/`, strips debug symbols. |
+| `--debug` | `Build` | Forces development geometry | Sets `-g -O0`, paths output to `./build/debug/` (Default behavior). |
+| `-j`, `--jobs <n>` | `Build` | Restricts parallel worker threads | Binds the task executor strictly to `<n>` concurrent compile threads. |
+| `--target <name>` | `Build` | Slices compilation pipeline | Isolates build steps to a specific binary block, bypassing unrelated graph nodes. |
+| `--no-cache`, `--clean` | `Build` | Evicts configuration state maps | Forces the engine to ignore existing artifact logs and rebuild everything from scratch. |
+| `-v`, `--verbose` | Global (Any position) | Elevates logging boundaries | Outputs full inner subsystem steps and passes `-v` directly down to `clang++`/`gcc`. |
+| `-q`, `--quiet` | Global (Any position) | Suppresses stdout output | Silences progress steps and warning outputs entirely except for critical failures. |
+
+---
+
+## Output Isolation & Target Mirroring
+
+To prevent compiler artifacts from colliding or mutating cross-profile configurations, `mokai` completely partitions the workspace build tree. 
+
+* **Intermediate Object Caching**: Component units and translation logs are safely localized into isolated sub-environments (`./build/<profile>/obj/`). This ensures that toggling between `--release` and `--debug` passes never accidentally maps mismatched or dirty intermediate object files into your final linkage phase.
+* **Compilation Database Generation**: Every build execution automatically synthesizes a standard `compile_commands.json` file placed directly at the root of your profile folder (`./build/<profile>/`). This allows full, modern language server configuration (like `clangd`) to map diagnostic targets without cluttering your project source root.
+
+---
+
+## Resource Scaling & Parallel Compilation
+
+By default, the build engine automatically assesses host limits via your system's hardware concurrency capabilities. It dynamically instantiates a thread-worker pool to execute independent file translation steps in parallel, maximizing CPU performance.
+
+### Explicit Core Throttling
+In constrained environments—such as specific continuous integration (CI) runners or when you want to bound system load on your dev machine—you can explicitly clip thread worker limits using the job allocation switch:
+
+```bash
+# Force the engine to thread lock your task pipeline to exactly two workers
+mokai Build -j 2
+```
+
+---
+
+## Cache Invalidation & Granular Targeting
+
+`mokai` maintains a state map inside the `.mokai/` project directory to determine file mutation telemetry using fast timestamp and hash checks. 
+
+### Force-Evicting the Cache
+If you encounter a scenario where you want to deliberately bypass verification matching and rebuild your entire project tree from absolute scratch, use the escape hatch:
+
+```bash
+mokai Build --clean
+```
+This flag evicts local tracking maps for the current pass, ensuring every source file drops its cache hit and re-evaluates through the full toolchain.
+
+### Target-Specific Pipeline Slicing
+For large, multi-target workspaces where you are iteratively debugging or changing a single binary module, evaluating the full dependency tree can introduce unnecessary friction. You can isolate your compilation down to a specific submodule output target:
+
+```bash
+mokai Build --target application_core
+```
+When this filter is active, the engine slices your target graph, skipping compilation and linkage loops for non-matching binary units, drastically tightening iterative development lookups.

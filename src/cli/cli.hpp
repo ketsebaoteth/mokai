@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-inline constexpr std::string_view MOKAI_VERSION = "0.0.1alpha";
+inline constexpr std::string_view MOKAI_VERSION = "v0.0.1a";
 
 namespace mokai {
 
@@ -31,10 +31,18 @@ inline constexpr std::string_view Info = "ℹ ";
 inline constexpr std::string_view Error = "✖ ";
 } // namespace Style
 
+enum class BuildProfile { Debug, Release };
+
 struct GlobalOptions {
   std::filesystem::path root_dir = std::filesystem::current_path();
   Verbosity verbosity = Verbosity::Default;
   ColorMode color = ColorMode::Auto;
+
+  // Core Engine Refactoring Flags
+  BuildProfile profile = BuildProfile::Debug;
+  int job_count = 0;
+  std::string target_filter = "";
+  bool force_rebuild = false;
 };
 
 // based on POSIX standard
@@ -45,14 +53,19 @@ enum class ExitCode : int {
   CommandNotFound = 127
 };
 
-enum class CliError {
-  UnknownCommand,
-  InvalidArguments,
-  BuildFailed,
-  PackageNotFound,
-  InvalidWorkspace,
-  GeneralFailure,
-  ProjectCreationDenied
+struct CliError {
+  enum class Code {
+    UnknownCommand,
+    InvalidArguments,
+    BuildFailed,
+    PackageNotFound,
+    InvalidWorkspace,
+    GeneralFailure,
+    ProjectCreationDenied
+  };
+
+  Code code;
+  std::string message;
 };
 
 struct CommandInfo {
@@ -66,7 +79,7 @@ struct CommandInfo {
 class Cli {
 public:
   Cli();
-  ~Cli();
+  ~Cli() = default;
   std::expected<std::monostate, CliError> ParseCliArgs(int argc, char *argv[]);
   int Run(int argc, char *argv[]);
 

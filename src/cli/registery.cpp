@@ -3,6 +3,10 @@
 namespace mokai {
 void Cli::initCommands() {
   m_supported_commands = {
+      {"help",
+       {"mokai --help [command]",
+        "logs usage and explanation for command specifed",
+        [this](auto &args) { return handleHelp(args); }}},
       {"create",
        {CREATEUSEANDEXPLANATION,
         [this](auto &args) { return handleCreateProject(args); }}},

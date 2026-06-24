@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -28,8 +27,6 @@ struct Toolchain {
   std::string archiver;
 };
 
-// FIXED GAP #4: Cached toolchain discovery to eliminate expensive
-// process-spawning bottlenecks
 static Toolchain discoverToolchain() {
   static Toolchain cached_toolchain;
   static bool discovered = false;
@@ -124,9 +121,6 @@ void Graph::collectTransitive(const std::string &node,
   if (!qt)
     return;
 
-  // FIXED GAP #2: Memoized traversal wrapper or direct lookups can optimize
-  // this further, keeping structural interface processing predictable across
-  // deep walks.
   for (const auto &raw_dep : qt->target.depends_on) {
     auto resolved = resolveDependsOnEntry(raw_dep, *qt);
     for (const auto &dep_name : resolved) {
@@ -167,8 +161,6 @@ Graph::flattenManifestTree(std::shared_ptr<mokai::ProjectManifest> manifest,
   return result;
 }
 
-// FIXED GAP #1: Stripped out raw unconditional std::cout trace log statements
-// to keep stdout clean
 static std::shared_ptr<ProjectManifest> FindResolvedDependency(
     const std::unordered_map<std::string, ResolvedDependency> &deps,
     const std::string &name_or_key) {
@@ -237,7 +229,6 @@ Graph::resolveDependsOnEntry(const std::string &raw_dep,
                              const QualifiedTarget &from_target) {
   std::vector<std::string> resolved;
 
-  // 1. Explicit syntax lookup (pkg:target)
   std::string pkg, explicit_target;
   if (SplitExplicitTarget(raw_dep, pkg, explicit_target)) {
     auto dep_manifest = FindResolvedDependency(
@@ -264,7 +255,6 @@ Graph::resolveDependsOnEntry(const std::string &raw_dep,
     return resolved;
   }
 
-  // 2. Profile syntax lookup (pkg/profile)
   std::string profilePkg, profileName;
   if (SplitProfile(raw_dep, profilePkg, profileName)) {
     auto dep_manifest = FindResolvedDependency(
@@ -292,14 +282,11 @@ Graph::resolveDependsOnEntry(const std::string &raw_dep,
     return resolved;
   }
 
-  // 3. Sibling target lookup
   if (auto *sibling = FindSiblingByName(m_allTargets, from_target, raw_dep)) {
     resolved.push_back(sibling->qualifiedName);
     return resolved;
   }
 
-  // 4. Vague Target Check: Scan sub-manifest dependencies for structural target
-  // names
   for (const auto &[dep_key, resolved_dep] :
        from_target.manifest->resolved_dependencies) {
     if (resolved_dep.manifest) {
@@ -314,7 +301,6 @@ Graph::resolveDependsOnEntry(const std::string &raw_dep,
     return resolved;
   }
 
-  // 5. Package Name Match / Default Exports (Fallback)
   auto dep_manifest = FindResolvedDependency(
       from_target.manifest->resolved_dependencies, raw_dep);
   if (!dep_manifest) {
@@ -672,6 +658,13 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     if (!qt)
       continue;
 
+    // Filter target pipeline checks at setup time if restricted sub-target
+    // optimization filters exist
+    if (!m_options.target_filter.empty() &&
+        qt->target.name != m_options.target_filter) {
+      continue;
+    }
+
     std::vector<std::string> target_srcs =
         resolveTargetSources(qt->target, qt->manifest);
     for (const auto &src : target_srcs) {
@@ -692,7 +685,10 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
   Toolchain toolchain = discoverToolchain();
   std::string output_root = "./build";
-  std::string sub_profile = "debug";
+
+  // Flag Knobs Refactoring Injection
+  std::string sub_profile =
+      (m_options.profile == BuildProfile::Release) ? "release" : "debug";
   std::string target_build_dir = output_root + "/" + sub_profile;
   std::string object_cache_dir = target_build_dir + "/obj";
 
@@ -709,7 +705,10 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
   std::unordered_map<std::string, std::pair<std::string, std::string>>
       state_cache;
-  if (fs::exists(cache_path)) {
+
+  // Bypasses localized token parsing entirely when a user sets a --clean
+  // compilation trigger flag
+  if (fs::exists(cache_path) && !m_options.force_rebuild) {
     std::ifstream cache_file(cache_path);
     std::string line, f_path, f_time, f_hash;
     while (std::getline(cache_file, line)) {
@@ -738,12 +737,25 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       return false;
 
     const Target &target = qt->target;
+
+    // Isolate graph optimization maps to specific user target directives
+    if (!m_options.target_filter.empty() &&
+        target.name != m_options.target_filter) {
+      if (m_options.verbosity == Verbosity::Verbose) {
+        m_logger.Debug("Filtering out target module execution tree step: " +
+                       qualified_name);
+      }
+      continue;
+    }
+
     std::vector<std::string> sources =
         resolveTargetSources(target, qt->manifest);
     if (sources.empty()) {
-      m_logger.Warn("Skipping build unit '" + qualified_name +
-                    "': Active source list evaluates to empty via current "
-                    "option configuration.");
+      if (m_options.verbosity != Verbosity::Quiet) {
+        m_logger.Warn("Skipping build unit '" + qualified_name +
+                      "': Active source list evaluates to empty via current "
+                      "option configuration.");
+      }
       continue;
     }
 
@@ -776,10 +788,10 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         std::string current_time = std::to_string(
             fs::last_write_time(file).time_since_epoch().count());
 
-        if (!state_cache.count(file) ||
+        if (m_options.force_rebuild || !state_cache.count(file) ||
             state_cache[file].first != current_time) {
           std::string current_hash = calculateFileHash(file);
-          if (!state_cache.count(file) ||
+          if (m_options.force_rebuild || !state_cache.count(file) ||
               state_cache[file].second != current_hash) {
             file_changed_detected = true;
             state_cache[file] = {current_time, current_hash};
@@ -796,12 +808,28 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
     executeHooks(qt->manifest, HookTrigger::PreTargetBuild, target.name);
 
-    m_logger.Step(current_step, total_steps,
-                  "Compiling unit: " + qualified_name + " [" + target.name +
-                      "]");
+    if (m_options.verbosity != Verbosity::Quiet) {
+      m_logger.Step(current_step, total_steps,
+                    "Compiling unit: " + qualified_name + " [" + target.name +
+                        "]");
+    }
 
     std::stringstream flags_stream;
     flags_stream << "-fPIC ";
+
+    // Append standard toolchain parameters explicitly based on Profile
+    // selections
+    if (m_options.profile == BuildProfile::Release) {
+      flags_stream << "-O3 -DNDEBUG ";
+    } else {
+      flags_stream << "-g -O0 ";
+    }
+
+    // Pass compiler flags straight down to the underlying compiler when
+    // requested by the CLI
+    if (m_options.verbosity == Verbosity::Verbose) {
+      flags_stream << "-v ";
+    }
 
     auto eval_cb = [this, &target, &qt](const std::string &cond) {
       return this->evaluateConditionExpression(cond, target, qt->manifest);
@@ -882,8 +910,13 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     std::atomic<bool> compilation_failed(false);
     std::atomic<bool> target_requires_linkage(false);
 
+    // Job Throttling Engine: defaults to standard thread count calculations
+    // unless explicitly throttled by user
     unsigned int worker_count =
-        std::max(1u, std::thread::hardware_concurrency());
+        (m_options.job_count > 0)
+            ? static_cast<unsigned int>(m_options.job_count)
+            : std::max(1u, std::thread::hardware_concurrency());
+
     std::vector<std::thread> workers;
     std::string working_directory = fs::current_path().string();
     std::string raw_manifest_std = qt->manifest->project.cpp_version;
@@ -918,8 +951,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
                                  : "-std=" + raw_manifest_std;
           }
 
-          // Generate object path mapping using deterministic target subfolders
-          // to prevent name hashing collision spikes
           std::string object_filename = src_path.filename().string() + ".o";
           fs::path out_obj_path =
               fs::path(object_cache_dir) / target.name / object_filename;
@@ -932,7 +963,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
               fs::last_write_time(src_path).time_since_epoch().count());
           bool need_compile = true;
 
-          if (state_cache.count(src)) {
+          if (!m_options.force_rebuild && state_cache.count(src)) {
             if (state_cache[src].first == current_time &&
                 fs::exists(obj_file)) {
               need_compile = false;
@@ -984,7 +1015,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       return false;
     }
 
-    // Resolve accurate binary target suffix layouts
     std::string target_output_file;
     if (target.type == TargetType::Executable) {
       target_output_file = target_build_dir + "/" + target.name;
@@ -1007,12 +1037,17 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
           link_cmd += "-shared ";
         }
 
+        // Pass Verbosity tags directly to linkage phase when debugging deep
+        // crashes
+        if (m_options.verbosity == Verbosity::Verbose) {
+          link_cmd += "-v ";
+        }
+
         for (const auto &obj : object_files) {
           link_cmd += " " + obj;
         }
         link_cmd += " -o " + target_output_file + " ";
 
-        // Link built workspace libraries upstream
         for (const auto &dep_name : transitive_deps) {
           if (built_library_map.count(dep_name)) {
             link_cmd += " " + built_library_map[dep_name] + " ";
@@ -1045,7 +1080,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     executeHooks(qt->manifest, HookTrigger::PostTargetBuild, target.name);
   }
 
-  // Dump telemetry maps back onto disk cleanly
   std::ofstream out_cache(cache_path);
   if (out_cache.is_open()) {
     for (const auto &[f_path, data] : state_cache) {
@@ -1054,7 +1088,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     out_cache.close();
   }
 
-  // Write compile_commands.json tool mappings
   if (!compile_commands_entries.empty()) {
     std::ofstream db_file(target_build_dir + "/compile_commands.json");
     if (db_file.is_open()) {
@@ -1078,10 +1111,13 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
                             build_end_time - build_start_time)
                             .count();
 
-  std::cout << Style::Green << "\n[mokai] Build completed successfully in "
-            << total_duration << "ms.\n";
-  std::cout << "[mokai] Cache Summary: " << Style::Green << total_cache_hits
-            << " hits, " << Style::Reset << total_cache_misses << " misses.\n";
+  if (m_options.verbosity != Verbosity::Quiet) {
+    std::cout << Style::Green << "\n[mokai] Build completed successfully in "
+              << total_duration << "ms.\n";
+    std::cout << "[mokai] Cache Summary: " << Style::Green << total_cache_hits
+              << " hits, " << Style::Reset << total_cache_misses
+              << " misses.\n";
+  }
 
   return true;
 }

@@ -1,7 +1,7 @@
 #include "log.h"
 #include <chrono>
 #include <ctime>
-#include <iostream>
+#include <print>
 
 namespace mokai::log {
 
@@ -24,7 +24,7 @@ std::string Logger::FormatTimestamp() const {
   std::tm tmBuf{};
   localtime_r(&t, &tmBuf);
 
-  char buf[16]; // "HH:MM:SS"
+  char buf[16];
   std::strftime(buf, sizeof(buf), "%H:%M:%S", &tmBuf);
   return std::string(buf);
 }
@@ -35,28 +35,34 @@ void Logger::WriteLine(Level level, const std::string &label,
     return;
   }
 
-  const char *labelColor = theme::info_label;
+  const char *badgeColor = theme::info_label;
+  const char *badgeText = "ℹ INFO ";
+
   switch (level) {
   case Level::Debug:
-    labelColor = theme::debug_label;
+    badgeColor = theme::debug_label;
+    badgeText = "⚙ DEBUG";
     break;
   case Level::Info:
-    labelColor = theme::info_label;
+    badgeColor = theme::info_label;
+    badgeText = "ℹ INFO ";
     break;
   case Level::Warn:
-    labelColor = theme::warn_label;
+    badgeColor = theme::warn_label;
+    badgeText = "⚠ WARN ";
     break;
   case Level::Error:
-    labelColor = theme::error_label;
+    badgeColor = theme::error_label;
+    badgeText = "✖ ERROR";
     break;
   case Level::Success:
-    labelColor = theme::success_label;
+    badgeColor = theme::success_label;
+    badgeText = "✔ SUCCESS";
     break;
   }
 
-  std::cout << theme::timestamp << FormatTimestamp() << theme::reset << " "
-            << theme::prefix << "[" << m_prefix << "]" << theme::reset << " | "
-            << labelColor << label << theme::reset << " |: " << msg << "\n";
+  std::println("{} {} {}{}{} {}", theme::timestamp, FormatTimestamp(),
+               badgeColor, badgeText, theme::reset, msg);
 }
 
 void Logger::Debug(const std::string &msg) {
@@ -79,10 +85,10 @@ void Logger::Step(int current, int total, const std::string &msg) {
   if (!ShouldLog(Level::Info)) {
     return;
   }
-  std::cout << theme::timestamp << FormatTimestamp() << theme::reset << " "
-            << theme::prefix << "[" << m_prefix << "]" << theme::reset << " | "
-            << theme::info_label << "[" << current << "/" << total << "]"
-            << theme::reset << " |: " << msg << "\n";
+
+  std::println("{} {} {}{}[{}/{}]{} {}", theme::timestamp, FormatTimestamp(),
+               theme::info_label, "◐ STEP  ", current, total, theme::reset,
+               msg);
 }
 
 void Logger::ErrorInline(const std::string &sourceLine, const std::string &hint,
@@ -97,23 +103,17 @@ void Logger::ErrorInline(const std::string &sourceLine, const std::string &hint,
   int underlineLen = (caretLength == -1)
                          ? static_cast<int>(sourceLine.size()) - caretStart
                          : caretLength;
-  if (underlineLen < 1)
+  if (underlineLen < 1) {
     underlineLen = 1;
+  }
 
-  // some spacing
-  std::cout << "\n";
-
-  // "2 | actualLine"
-  std::cout << theme::line_no << lineNoStr << " |" << theme::reset << " "
-            << theme::source_line << sourceLine << theme::reset << "\n";
-
-  // "  | ^^^^^^^  did you mean: something"
-  std::cout << theme::line_no << gutter << " |" << theme::reset << " "
-            << std::string(caretStart, ' ') << theme::caret
-            << std::string(underlineLen, '^') << theme::reset << "  "
-            << theme::hint << hint << theme::reset << "\n";
-
-  std::cout << "\n";
+  std::println("");
+  std::println(" {} {} |{} {}", theme::line_no, lineNoStr, theme::reset,
+               sourceLine);
+  std::println(" {} {} |{} {}{}{}  {}{}{}", theme::line_no, gutter,
+               theme::reset, std::string(caretStart, ' '), theme::caret,
+               std::string(underlineLen, '^'), theme::hint, hint, theme::reset);
+  std::println("");
 }
 
 } // namespace mokai::log

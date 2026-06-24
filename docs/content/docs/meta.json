@@ -2,6 +2,7 @@
   "pages": [
     "index",
     "config",
+    "features",
     "build-system",
     "architecture"
   ]
