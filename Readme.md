@@ -220,9 +220,45 @@ This approach allows Mokai to build complex dependency chains, such as [SFML 3](
 
 ---
 
+## Building from Source
+
+Mokai is entirely self-hosting. The repository contains a native `mokai.toml` manifest to drive the build pipeline. To build Mokai from source, you use a bootstrapped instance of the Mokai binary itself to handle the target tree compilation automatically.
+
+### Prerequisites
+
+Ensure you have a modern C++ compiler supporting the C++23 standard:
+* **Linux:** GCC 13+ or Clang 16+
+* **Windows:** MSVC v19.38+ (Visual Studio 2022)
+
+### Building the Project
+
+1. Clone the repository layout:
+```bash
+git clone [https://github.com/ketsebaoteth/mokai](https://github.com/ketsebaoteth/mokai)
+cd mokai
+
+```
+
+2. Bootstrapping Mokai into your localized environment:
+
+```bash
+# Pull the latest stable compiler binary to execute the pipeline
+curl -fsSL [https://raw.githubusercontent.com/ketsebaoteth/mokai/main/get.sh](https://raw.githubusercontent.com/ketsebaoteth/mokai/main/get.sh) | bash
+```
+
+3. Compile the current repository source code directly using Mokai:
+
+```bash
+# This reads the native mokai.toml file and builds the updated binary targets
+mokai build
+```
+
+---
+
 ## Contributing
 
 Mokai is in its early stages and the design is still evolving. Issues, feature ideas, and pull requests are welcome. Testing Mokai against libraries you currently use and opening an issue with what broke is highly appreciated.
+
 
 ## License
 
