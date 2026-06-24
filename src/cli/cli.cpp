@@ -4,6 +4,7 @@
 #include "log/log.h"
 #include <algorithm>
 #include <cstdio>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,7 @@
 #include <string>
 #include <termios.h>
 #include <unistd.h>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -19,10 +21,13 @@ namespace mokai {
 
 // Nuxt Cli-inspired ANSI Color Definitions
 
-Cli::Cli(int argc, char *argv[]) {
+Cli::Cli() {
   log::Logger log;
   m_logger = log;
   log.SetPrefix("mokai");
+};
+
+int Cli::Run(int argc, char *argv[]) {
   if (argc == 1) {
     std::cout << Style::Green << "🟢 mokai " << Style::Dim << "v0.1.0\n"
               << Style::Reset;
@@ -31,13 +36,31 @@ Cli::Cli(int argc, char *argv[]) {
               << Style::Reset;
     std::cout << Style::Bold << "Available commands:\n" << Style::Reset;
     logSupportedCommands();
-    return;
+    return static_cast<int>(ExitCode::UsageError);
   }
   initCommands();
-  ParseCliArgs(argc, argv);
-};
+  auto result = ParseCliArgs(argc, argv);
+  if (!result.has_value()) {
+    switch (result.error()) {
+    case CliError::UnknownCommand:
+      logSupportedCommands();
+      return static_cast<int>(ExitCode::CommandNotFound);
 
-void Cli::ParseCliArgs(int argc, char *argv[]) {
+    case CliError::InvalidArguments:
+      return static_cast<int>(ExitCode::UsageError);
+
+    case CliError::BuildFailed:
+      return static_cast<int>(ExitCode::GeneralFailure);
+
+    default:
+      return static_cast<int>(ExitCode::GeneralFailure);
+    }
+  }
+  return static_cast<int>(ExitCode::Success);
+}
+
+std::expected<std::monostate, CliError> Cli::ParseCliArgs(int argc,
+                                                          char *argv[]) {
   std::string command = argv[1];
 
   std::vector<std::string> cmdArgs;
@@ -47,13 +70,15 @@ void Cli::ParseCliArgs(int argc, char *argv[]) {
 
   auto cmdToDispath = m_supported_commands.find(command);
   if (cmdToDispath != m_supported_commands.end()) {
-    cmdToDispath->second.callback(cmdArgs);
+    auto result = cmdToDispath->second.callback(cmdArgs);
+    return result;
   } else {
     std::cout << Style::Red << Style::Error << "Unknown command: " << command
               << "\n"
               << Style::Reset;
     std::cout << Style::Dim << "Available commands:\n" << Style::Reset;
     logSupportedCommands();
+    return std::unexpected(CliError::UnknownCommand);
   }
 }
 
@@ -89,13 +114,14 @@ void printWrapped(const std::string &text, size_t max_line_length = 80,
   }
 }
 
-void Cli::handleHelp(const std::vector<std::string> &args) {
+std::expected<std::monostate, CliError>
+Cli::handleHelp(const std::vector<std::string> &args) {
   if (args.size() == 0) {
     std::cout << Style::Red << Style::Error
               << "No command specified for help.\n"
               << Style::Reset;
     logSupportedCommands();
-    return;
+    return std::unexpected(CliError::InvalidArguments);
   }
   std::string helpCommand = args[0];
   auto help = m_supported_commands.find(helpCommand);
@@ -107,14 +133,17 @@ void Cli::handleHelp(const std::vector<std::string> &args) {
     std::cout << " " << Style::Dim << "Details:" << Style::Reset << " ";
     printWrapped(help->second.explanation.data(), 80, "          ");
     std::cout << "\n";
+    return std::unexpected(CliError::InvalidArguments);
   } else {
     std::cout << Style::Red << Style::Error << "Unsupported command.\n"
               << Style::Reset;
     logSupportedCommands();
+    return std::unexpected(CliError::UnknownCommand);
   }
 }
 
-void Cli::handleBuild(const std::vector<std::string> &args) {
+std::expected<std::monostate, CliError>
+Cli::handleBuild(const std::vector<std::string> &args) {
   fs::path workingDir = fs::current_path();
 
   std::cout << Style::Cyan << Style::Arrow
@@ -128,20 +157,21 @@ void Cli::handleBuild(const std::vector<std::string> &args) {
     std::cout << Style::Red << Style::Error
               << "Build pipeline aborted: cyClic or invalid dependencies.\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::BuildFailed);
   }
 
   if (!graph.BuildAllTree(buildOrder)) {
     std::cout << Style::Red << Style::Error
               << "Compilation sequence dropped out with errors.\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::BuildFailed);
   }
 
   std::cout << "\n"
             << Style::Green << Style::Success
             << "Build completed successfully.\n"
             << Style::Reset;
+  return {};
 }
 
 // Interactive Multi-Choice Component with Navigation and Viewport Scrolling
@@ -263,14 +293,15 @@ static std::string promptText(const std::string &prompt,
 }
 
 // High-Performance Interactive Package Routing Subsystem Addition Handler
-void Cli::handlePackageAdd(const std::vector<std::string> &args) {
+std::expected<std::monostate, CliError>
+Cli::handlePackageAdd(const std::vector<std::string> &args) {
   fs::path tomlPath = fs::current_path() / "mokai.toml";
   if (!fs::exists(tomlPath)) {
     std::cout << Style::Red << Style::Error
               << "Active workspace error: No 'mokai.toml' file found in "
                  "current context root.\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::InvalidWorkspace);
   }
 
   std::string chosenPackage = "";
@@ -377,7 +408,7 @@ void Cli::handlePackageAdd(const std::vector<std::string> &args) {
         << Style::Red << Style::Error
         << "Aborted package insertion: Selection expression sequence invalid.\n"
         << Style::Reset;
-    return;
+    return std::unexpected(CliError::PackageNotFound);
   }
 
   // Surgical manifest line injection sequence preserving project spacing layout
@@ -423,6 +454,7 @@ void Cli::handlePackageAdd(const std::vector<std::string> &args) {
             << "Hint: Invoke 'mokai Build' to evaluate routing graphs and "
                "trigger smart clone/fetch execution passes.\n"
             << Style::Reset;
+  return {};
 }
 static void processTemplatePlaceholders(const fs::path &file_path,
                                         const std::string &project_name,
@@ -457,7 +489,8 @@ static void processTemplatePlaceholders(const fs::path &file_path,
   }
 }
 
-void Cli::handleCreateProject(const std::vector<std::string> &args) {
+std::expected<std::monostate, CliError>
+Cli::handleCreateProject(const std::vector<std::string> &args) {
   std::cout << "\n"
             << Style::Green << "✨ Mokai Initializer " << Style::Dim
             << "– Create a new environment\n"
@@ -475,7 +508,7 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
               << Style::Red << Style::Error << "Aborted: Directory '"
               << project_name << "' already exists.\n\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::InvalidArguments);
   }
 
   // 2. Choose C++ Version
@@ -499,7 +532,7 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
         << "Template Engine Error: Unable to locate source configurations.\n";
     std::cout << "  Expected path mapping: " << template_root.string() << "\n\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::GeneralFailure);
   }
 
   std::vector<std::string> available_templates;
@@ -513,7 +546,7 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
     std::cout << Style::Red << Style::Error
               << "No architectural blueprints found under assets path.\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::GeneralFailure);
   }
 
   std::sort(available_templates.begin(), available_templates.end());
@@ -522,13 +555,11 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
   std::string chosen_template = available_templates[template_idx];
   fs::path selected_template_path = template_root / chosen_template;
 
-  // 4. Ask about Git initialization
   std::vector<std::string> git_options = {"Yes", "No"};
   size_t git_idx = promptChoice(
       "Initialize empty local Git version control tree?", git_options, 0);
   bool init_git = (git_idx == 0);
 
-  // 5. Scaffold the project files
   std::cout << "\n"
             << Style::Dim << "⠋ Spawning environment scaffolding..."
             << Style::Reset << "\r";
@@ -546,7 +577,7 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
               << Style::Red << Style::Error << "I/O Failure writing files:\n  "
               << e.what() << "\n\n"
               << Style::Reset;
-    return;
+    return std::unexpected(CliError::ProjectCreationDenied);
   }
 
   // 6. Optional Git initialization
@@ -565,6 +596,7 @@ void Cli::handleCreateProject(const std::vector<std::string> &args) {
   std::cout << "  " << Style::Cyan << "cd " << project_name << Style::Reset
             << "\n";
   std::cout << "  " << Style::Cyan << "mokai Build" << Style::Reset << "\n\n";
+  return {};
 }
 
 Cli::~Cli() {}

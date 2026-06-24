@@ -1,11 +1,13 @@
 #pragma once
 #include "exp.hpp"
 #include "log/log.h"
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 inline constexpr std::string_view MOKAI_VERSION = "0.0.1alpha";
@@ -35,17 +37,38 @@ struct GlobalOptions {
   ColorMode color = ColorMode::Auto;
 };
 
+// based on POSIX standard
+enum class ExitCode : int {
+  Success = 0,
+  GeneralFailure = 1,
+  UsageError = 2,
+  CommandNotFound = 127
+};
+
+enum class CliError {
+  UnknownCommand,
+  InvalidArguments,
+  BuildFailed,
+  PackageNotFound,
+  InvalidWorkspace,
+  GeneralFailure,
+  ProjectCreationDenied
+};
+
 struct CommandInfo {
   std::string_view usage;
   std::string_view explanation;
-  std::function<void(const std::vector<std::string> &)> callback;
+  std::function<std::expected<std::monostate, CliError>(
+      const std::vector<std::string> &)>
+      callback;
 };
 
 class Cli {
 public:
-  Cli(int argc, char **argv);
+  Cli();
   ~Cli();
-  void ParseCliArgs(int argc, char *argv[]);
+  std::expected<std::monostate, CliError> ParseCliArgs(int argc, char *argv[]);
+  int Run(int argc, char *argv[]);
 
 private:
   log::Logger m_logger;
@@ -54,9 +77,17 @@ private:
 
   void initCommands();
   void logSupportedCommands();
-  void handleHelp(const std::vector<std::string> &args);
-  void handleBuild(const std::vector<std::string> &args);
-  void handlePackageAdd(const std::vector<std::string> &args);
-  void handleCreateProject(const std::vector<std::string> &args);
+
+  std::expected<std::monostate, CliError>
+  handleHelp(const std::vector<std::string> &args);
+
+  std::expected<std::monostate, CliError>
+  handleBuild(const std::vector<std::string> &args);
+
+  std::expected<std::monostate, CliError>
+  handlePackageAdd(const std::vector<std::string> &args);
+
+  std::expected<std::monostate, CliError>
+  handleCreateProject(const std::vector<std::string> &args);
 };
 } // namespace mokai
