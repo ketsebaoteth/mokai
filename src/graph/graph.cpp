@@ -882,6 +882,8 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     }
 
     auto transitive_deps = getTransitiveDependencies(qualified_name);
+    std::reverse(transitive_deps.begin(), transitive_deps.end());
+
     std::unordered_set<std::string> seen_includes;
     for (const auto &dep_name : transitive_deps) {
       if (const QualifiedTarget *dep_qt = FindByQualifiedName(dep_name)) {
