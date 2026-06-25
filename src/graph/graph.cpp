@@ -9,7 +9,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -529,7 +528,7 @@ void Graph::matchGlobPattern(const std::string &pattern,
     } else if (c == '?') {
       regex_str += "[^/]";
     } else if (c == '.' || c == '+' || c == '^' || c == '$' || c == '(' ||
-               c == ')' || c == '(' || c == ']' || c == '|') {
+               c == ')' || c == '[' || c == ']' || c == '|') {
       regex_str += '\\';
       regex_str += c;
     } else {
@@ -550,9 +549,16 @@ void Graph::matchGlobPattern(const std::string &pattern,
   };
 
   if (is_recursive) {
-    for (const auto &entry : fs::recursive_directory_iterator(search_root)) {
-      if (fs::is_regular_file(entry)) {
-        normalize_and_add(entry.path());
+    // OPTIMIZATION: Early filtering of non-source heavy directories
+    for (auto it = fs::recursive_directory_iterator(search_root);
+         it != fs::recursive_directory_iterator(); ++it) {
+      std::string dir_name = it->path().filename().string();
+      if (dir_name == "build" || dir_name == ".git" || dir_name == ".mokai") {
+        it.disable_recursion_pending();
+        continue;
+      }
+      if (fs::is_regular_file(*it)) {
+        normalize_and_add(it->path());
       }
     }
   } else {
@@ -709,38 +715,6 @@ void Graph::executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
   }
 }
 
-static void
-collectHeaderDependencies(const std::string &file_path,
-                          const std::vector<std::string> &include_dirs,
-                          std::unordered_set<std::string> &visited_headers) {
-  if (visited_headers.count(file_path) || visited_headers.size() > 128)
-    return;
-  visited_headers.insert(file_path);
-
-  std::ifstream file(file_path);
-  if (!file.is_open())
-    return;
-
-  static const std::regex include_regex(R"(#\s*include\s*["<]([^">]+)[">])");
-  std::string line;
-  std::smatch match;
-
-  while (std::getline(file, line)) {
-    if (std::regex_search(line, match, include_regex)) {
-      std::string header_name = match[1].str();
-
-      for (const auto &dir : include_dirs) {
-        fs::path candidate = fs::path(dir) / header_name;
-        if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
-          std::string normalized = candidate.lexically_normal().string();
-          collectHeaderDependencies(normalized, include_dirs, visited_headers);
-          break;
-        }
-      }
-    }
-  }
-}
-
 bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   if (build_order.empty()) {
     m_logger.Warn("Build pipeline terminated: No build sequence targets "
@@ -749,6 +723,11 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   }
 
   std::unordered_map<std::string, std::string> source_filename_to_target;
+  // OPTIMIZATION: Cache resolved vectors to prevent repeating expensive
+  // crawling operations later
+  std::unordered_map<std::string, std::vector<std::string>>
+      cached_resolved_sources;
+
   for (const auto &qualified_name : build_order) {
     const QualifiedTarget *qt = FindByQualifiedName(qualified_name);
     if (!qt)
@@ -761,6 +740,8 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
     std::vector<std::string> target_srcs =
         resolveTargetSources(qt->target, qt->manifest);
+    cached_resolved_sources[qualified_name] = target_srcs;
+
     for (const auto &src : target_srcs) {
       std::string filename = fs::path(src).filename().string();
       if (source_filename_to_target.count(filename)) {
@@ -797,6 +778,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
   std::unordered_map<std::string, std::pair<std::string, std::string>>
       state_cache;
+  std::mutex cache_mutex;
 
   if (fs::exists(cache_path) && !m_options.force_rebuild) {
     std::ifstream cache_file(cache_path);
@@ -812,8 +794,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   std::unordered_map<std::string, std::string> built_library_map;
   std::vector<std::string> compile_commands_entries;
   std::mutex compilation_db_mutex;
-  std::mutex terminal_output_mutex; // Prevents parallel workers from corrupting
-                                    // terminal telemetry streams
 
   if (!m_allTargets.empty()) {
     executeHooks(m_allTargets.front().manifest, HookTrigger::PreBuild, "");
@@ -882,7 +862,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     std::shared_ptr<const std::vector<std::string>> shared_base_args;
     std::string working_directory;
     bool is_msvc;
-    std::vector<std::string> lookup_directories;
   };
 
   struct CacheRecord {
@@ -909,8 +888,8 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   std::mutex queue_mutex;
   std::condition_variable queue_cv;
   std::atomic<bool> workers_should_terminate{false};
+
   std::atomic<int> current_global_step{0};
-  std::mutex cache_read_mutex;
 
   std::vector<std::thread> workers;
   for (unsigned int i = 0; i < worker_count; ++i) {
@@ -943,47 +922,27 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         }
 
         bool need_compile = true;
-        std::string aggregate_timestamp_key = "0";
-
+        std::string current_time;
         try {
           fs::path src_path(task.src);
           if (fs::exists(src_path)) {
-            std::unordered_set<std::string> visited_headers;
-            collectHeaderDependencies(task.src, task.lookup_directories,
-                                      visited_headers);
+            current_time = std::to_string(
+                fs::last_write_time(src_path).time_since_epoch().count());
 
-            uint64_t combined_time_accum = 0;
-            for (const auto &hdr : visited_headers) {
-              if (fs::exists(hdr)) {
-                combined_time_accum +=
-                    fs::last_write_time(hdr).time_since_epoch().count();
-              }
-            }
-            aggregate_timestamp_key = std::to_string(combined_time_accum);
-
-            std::lock_guard<std::mutex> lock(cache_read_mutex);
+            std::lock_guard<std::mutex> lock(cache_mutex);
             if (!m_options.force_rebuild && state_cache.count(task.src) &&
-                state_cache[task.src].first == aggregate_timestamp_key &&
+                state_cache[task.src].first == current_time &&
                 fs::exists(task.obj_file)) {
               need_compile = false;
               total_cache_hits++;
             }
           }
         } catch (...) {
-          need_compile = true;
         }
 
         if (need_compile) {
           total_cache_misses++;
           ctx->requires_linkage = true;
-
-          // Sync output streams to present a beautiful, synchronized source
-          // compilation telemetry list
-          if (m_options.verbosity != Verbosity::Quiet) {
-            std::lock_guard<std::mutex> term_lock(terminal_output_mutex);
-            std::cout << "    \x1B[34m•\x1B[0m Building source unit: "
-                      << task.src << std::endl;
-          }
 
           std::vector<std::string> file_args;
           file_args.reserve(task.shared_base_args->size() + 5);
@@ -1034,9 +993,11 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
             ctx->failed = true;
             global_build_failed = true;
           } else {
-            std::lock_guard<std::mutex> rec_lock(ctx->cache_records_mutex);
-            ctx->computed_cache_records.push_back(
-                {task.src, aggregate_timestamp_key, "-"});
+            if (!current_time.empty()) {
+              std::lock_guard<std::mutex> rec_lock(ctx->cache_records_mutex);
+              ctx->computed_cache_records.push_back(
+                  {task.src, current_time, "-"});
+            }
           }
         }
 
@@ -1064,8 +1025,9 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       const QualifiedTarget *qt = FindByQualifiedName(current_ready);
       const Target &target = qt->target;
 
-      std::vector<std::string> sources =
-          resolveTargetSources(target, qt->manifest);
+      // OPTIMIZATION: Pulled directly from cache, avoiding secondary disk crawl
+      // entirely
+      std::vector<std::string> sources = cached_resolved_sources[current_ready];
       if (sources.empty()) {
         if (m_options.verbosity != Verbosity::Quiet) {
           m_logger.Warn("Skipping build unit '" + current_ready +
@@ -1082,6 +1044,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       }
 
       {
+        std::lock_guard<std::mutex> lock(cache_mutex);
         total_source_files += sources.size();
       }
 
@@ -1089,7 +1052,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
       int step_idx = ++current_global_step;
       if (m_options.verbosity != Verbosity::Quiet) {
-        std::lock_guard<std::mutex> term_lock(terminal_output_mutex);
         m_logger.Step(step_idx, total_pipeline_targets,
                       "Compiling unit: " + current_ready + " [" + target.name +
                           "]");
@@ -1128,24 +1090,18 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       std::string base =
           qt->manifest->base_dir.empty() ? "." : qt->manifest->base_dir;
       std::string inc_prefix = toolchain.is_msvc ? "/I" : "-I";
-      std::vector<std::string> target_lookup_dirs;
-      target_lookup_dirs.push_back(base);
 
       for (const auto &inc : target.include_dirs) {
         fs::path inc_path(inc);
         if (inc_path.is_relative())
           inc_path = fs::path(base) / inc_path;
-        std::string resolved_inc = inc_path.lexically_normal().string();
-        base_args->push_back(inc_prefix + resolved_inc);
-        target_lookup_dirs.push_back(resolved_inc);
+        base_args->push_back(inc_prefix + inc_path.lexically_normal().string());
       }
       for (const auto &inc : qt->manifest->project.include_dirs) {
         fs::path inc_path(inc);
         if (inc_path.is_relative())
           inc_path = fs::path(base) / inc_path;
-        std::string resolved_inc = inc_path.lexically_normal().string();
-        base_args->push_back(inc_prefix + resolved_inc);
-        target_lookup_dirs.push_back(resolved_inc);
+        base_args->push_back(inc_prefix + inc_path.lexically_normal().string());
       }
 
       auto transitive_deps = getTransitiveDependencies(current_ready);
@@ -1167,7 +1123,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
               if (!seen_includes.contains(norm_inc)) {
                 seen_includes.insert(norm_inc);
                 base_args->push_back(inc_prefix + norm_inc);
-                target_lookup_dirs.push_back(norm_inc);
               }
             }
           }
@@ -1218,13 +1173,14 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
         std::string object_filename =
             src_path.filename().string() + (toolchain.is_msvc ? ".obj" : ".o");
+
         fs::path out_obj_path = target_obj_dir / object_filename;
         std::string obj_file = out_obj_path.string();
         ctx->object_files[idx] = obj_file;
 
         localized_tasks.push_back({src, obj_file, chosen_compiler,
                                    final_std_flag, base_args, working_directory,
-                                   toolchain.is_msvc, target_lookup_dirs});
+                                   toolchain.is_msvc});
       }
 
       if (localized_tasks.empty()) {
@@ -1263,8 +1219,8 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
         const Target &target = ctx->qt->target;
         std::string qualified_name = ctx->qt->qualifiedName;
-        std::string target_output_file;
 
+        std::string target_output_file;
 #if defined(_WIN32) || defined(_WIN64)
         if (target.type == TargetType::Executable)
           target_output_file = target_build_dir + "/" + target.name + ".exe";
@@ -1338,14 +1294,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
             }
           }
 
-          // Print clean output linking logs
-          if (m_options.verbosity != Verbosity::Quiet) {
-            std::lock_guard<std::mutex> term_lock(terminal_output_mutex);
-            std::cout << "    \x1B[35m•\x1B[0m Generating artifact target: "
-                      << fs::path(target_output_file).filename().string()
-                      << std::endl;
-          }
-
           int link_res = std::system(link_cmd.c_str());
           if (link_res != 0) {
             m_logger.Error("Linkage stage failed for block target: " +
@@ -1358,7 +1306,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         built_library_map[qualified_name] = target_output_file;
 
         {
-          std::lock_guard<std::mutex> lock(cache_read_mutex);
+          std::lock_guard<std::mutex> lock(cache_mutex);
           for (const auto &rec : ctx->computed_cache_records) {
             state_cache[rec.src] = {rec.write_time, rec.hash};
           }

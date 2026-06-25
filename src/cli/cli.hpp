@@ -54,7 +54,7 @@ struct GlobalOptions {
   std::vector<std::string> user_compiler_flags;
 };
 
-// based on POSIX standard
+// Based on POSIX standard
 enum class ExitCode : int {
   Success = 0,
   GeneralFailure = 1,
@@ -93,9 +93,20 @@ public:
   int Run(int argc, char *argv[]);
 
 private:
+  struct ConfigCacheEntry {
+    std::unique_ptr<Config> config;
+    std::filesystem::file_time_type last_modified;
+  };
+
+  // Path-indexed cache storage for parsed configuration profiles
+  std::unordered_map<std::string, ConfigCacheEntry> m_config_registry;
+
+  // Internal helper to fetch parsed manifest files safely without hitting the
+  // disk redundantly
+  Config *getConfig(const std::filesystem::path &tomlPath);
+
   log::Logger m_logger;
   GlobalOptions m_options;
-  std::unique_ptr<Config> m_config;
   std::unordered_map<std::string, CommandInfo> m_supported_commands;
 
   void initCommands();

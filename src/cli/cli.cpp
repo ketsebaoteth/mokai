@@ -191,6 +191,48 @@ std::expected<std::monostate, CliError> Cli::ParseCliArgs(int argc,
                                   "Unknown command issued: '" + command + "'"});
 }
 
+Config *Cli::getConfig(const fs::path &tomlPath) {
+  std::string pathStr = fs::absolute(tomlPath).lexically_normal().string();
+
+  bool exists = fs::exists(tomlPath);
+  fs::file_time_type current_time;
+  if (exists) {
+    try {
+      current_time = fs::last_write_time(tomlPath);
+    } catch (...) {
+      exists = false;
+    }
+  }
+
+  auto it = m_config_registry.find(pathStr);
+  if (it != m_config_registry.end()) {
+    if (exists && it->second.last_modified == current_time) {
+      return it->second.config.get();
+    }
+    if (exists) {
+      it->second.last_modified = current_time;
+      it->second.config =
+          std::make_unique<Config>(tomlPath.parent_path().string());
+    } else {
+      m_config_registry.erase(it);
+      return nullptr;
+    }
+    return it->second.config.get();
+  }
+
+  if (exists) {
+    ConfigCacheEntry entry;
+    entry.last_modified = current_time;
+    entry.config = std::make_unique<Config>(tomlPath.parent_path().string());
+
+    auto [insertedIt, success] =
+        m_config_registry.emplace(pathStr, std::move(entry));
+    return insertedIt->second.config.get();
+  }
+
+  return nullptr;
+}
+
 static void
 printWrapped(const std::string_view &text, size_t max_line_length = 80,
              const std::string_view &indent = "                  ") {
@@ -271,8 +313,14 @@ Cli::handleBuild(const std::vector<std::string> &args) {
                  Style::Reset);
   }
 
-  m_config = std::make_unique<Config>(workingDir.string());
-  Graph graph(m_config->getManifest(), m_options);
+  Config *currentConfig = getConfig(workingDir / "mokai.toml");
+  if (!currentConfig) {
+    return std::unexpected(
+        CliError{CliError::Code::InvalidWorkspace,
+                 "Could not read or parse workspace configuration manifest."});
+  }
+
+  Graph graph(currentConfig->getManifest(), m_options);
 
   auto buildOrder = graph.computeBuildOrder(graph.getEdges());
   if (buildOrder.empty()) {
@@ -297,8 +345,15 @@ Cli::handleBuild(const std::vector<std::string> &args) {
 std::expected<std::monostate, CliError>
 Cli::handleRun(const std::vector<std::string> &args) {
   fs::path workingDir = fs::current_path();
-  m_config = std::make_unique<Config>(workingDir.string());
-  auto manifest = m_config->getManifest();
+
+  Config *currentConfig = getConfig(workingDir / "mokai.toml");
+  if (!currentConfig) {
+    return std::unexpected(CliError{
+        CliError::Code::InvalidWorkspace,
+        "Unable to trace workspace root configuration manifest context."});
+  }
+
+  auto manifest = currentConfig->getManifest();
 
   if (!manifest) {
     return std::unexpected(CliError{
@@ -327,14 +382,12 @@ Cli::handleRun(const std::vector<std::string> &args) {
       forwardArgs.push_back(args[i]);
     }
   } else {
-    // 1. Look for explicit target flagged default_target = true
     for (const auto &target : manifest->targets) {
       if (target.is_default && target.type == TargetType::Executable) {
         chosenTarget = &target;
         break;
       }
     }
-    // 2. Fall back cleanly to the first Executable target found
     if (!chosenTarget) {
       for (const auto &target : manifest->targets) {
         if (target.type == TargetType::Executable) {
@@ -360,8 +413,6 @@ Cli::handleRun(const std::vector<std::string> &args) {
             "' is configured as a library rule module and cannot be run."});
   }
 
-  // Pre-trigger standard recursive compilation to keep runtime artifacts
-  // updated
   auto buildRes = handleBuild({});
   if (!buildRes.has_value()) {
     return buildRes;
@@ -690,7 +741,7 @@ Cli::handlePackageAdd(const std::vector<std::string> &args) {
   std::println("\n{}{}Successfully added dependency to mokai.toml -> {}{}{}",
                Style::Green, Style::Success, Style::Reset, Style::Bold,
                chosenPackage, Style::Reset);
-  std::println("{}Hint: Invoke 'mokai Build' to evaluate routing graphs and "
+  std::println("{}Hint: Invoke 'mokai build' to evaluate routing graphs and "
                "trigger smart clone/fetch execution passes.{}",
                Style::Dim, Style::Reset);
   return {};
