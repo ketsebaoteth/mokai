@@ -2,7 +2,9 @@
 
 #include "graph/types.hpp"
 #include "log/log.h"
+#include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,6 +37,12 @@ public:
 private:
   void populateRegistry(std::shared_ptr<ProjectManifest> manifest,
                         const std::string &path_prefix);
+
+  // Binary Graph Caching (Includes resolved sources)
+  bool tryLoadGraphCache();
+  void saveGraphCache();
+  std::string getCachePath() const;
+
   std::string generateQualifiedName(const std::string &prefix,
                                     const std::string &name) const;
   std::vector<GraphEdge> buildEdges();
@@ -68,6 +76,14 @@ private:
 
   std::unordered_map<std::string, QualifiedTarget> m_targetRegistry;
   std::unordered_set<ProjectManifest *> m_processedManifests;
+
+  // Cache of Manifest Timestamps
+  std::unordered_map<std::string, std::string> m_manifestTimestamps;
+
+  // Cache of Resolved Source Files (FQDN -> List of Paths)
+  // This prevents re-running regex globbing on every build.
+  std::unordered_map<std::string, std::vector<std::string>>
+      m_resolvedSourcesCache;
 
   std::shared_ptr<ProjectManifest> m_root_manifest;
   std::vector<GraphEdge> m_edges;

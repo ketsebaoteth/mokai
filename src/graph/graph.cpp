@@ -34,6 +34,9 @@ namespace mokai {
 
 static std::mutex g_log_mutex;
 
+// ============================================================================
+// Platform-Native Process Spawning (Zero-Shell Overhead)
+// ============================================================================
 static int executeCommandFast(const std::vector<std::string> &args) {
   if (args.empty())
     return -1;
@@ -116,42 +119,104 @@ static std::string escapeJsonString(const std::string &input) {
   return output;
 }
 
-static std::string triggerToString(HookTrigger trigger) {
-  switch (trigger) {
-  case HookTrigger::PreBuild:
-    return "pre_build";
-  case HookTrigger::PostBuild:
-    return "post_build";
-  case HookTrigger::PreTargetBuild:
-    return "pre_target_build";
-  case HookTrigger::PostTargetBuild:
-    return "post_target_build";
-  case HookTrigger::FileChange:
-    return "file_change";
-  default:
-    return "unknown";
+// ============================================================================
+// Binary Cache Logic (Serialization)
+// ============================================================================
+static void writeString(std::ostream &os, const std::string &s) {
+  size_t len = s.size();
+  os.write(reinterpret_cast<const char *>(&len), sizeof(len));
+  os.write(s.data(), len);
+}
+
+static std::string readString(std::istream &is) {
+  size_t len;
+  is.read(reinterpret_cast<char *>(&len), sizeof(len));
+  std::string s(len, '\0');
+  is.read(&s[0], len);
+  return s;
+}
+
+std::string Graph::getCachePath() const {
+  return (fs::path(".mokai") / "graph.bin").string();
+}
+
+bool Graph::tryLoadGraphCache() {
+  std::string path = getCachePath();
+  if (!fs::exists(path))
+    return false;
+
+  std::ifstream is(path, std::ios::binary);
+  if (!is.is_open())
+    return false;
+
+  size_t manifestCount;
+  is.read(reinterpret_cast<char *>(&manifestCount), sizeof(manifestCount));
+  for (size_t i = 0; i < manifestCount; ++i) {
+    std::string mPath = readString(is);
+    std::string mTime = readString(is);
+
+    // Validate timestamp against disk
+    if (!fs::exists(mPath))
+      return false;
+    std::string currentTime =
+        std::to_string(fs::last_write_time(mPath).time_since_epoch().count());
+    if (currentTime != mTime)
+      return false;
+    m_manifestTimestamps[mPath] = currentTime;
+  }
+
+  size_t edgeCount;
+  is.read(reinterpret_cast<char *>(&edgeCount), sizeof(edgeCount));
+  m_edges.clear();
+  for (size_t i = 0; i < edgeCount; ++i) {
+    std::string from = readString(is);
+    std::string to = readString(is);
+    m_edges.push_back({from, to});
+  }
+
+  return true;
+}
+
+void Graph::saveGraphCache() {
+  std::ofstream os(getCachePath(), std::ios::binary);
+  if (!os.is_open())
+    return;
+
+  size_t manifestCount = m_manifestTimestamps.size();
+  os.write(reinterpret_cast<const char *>(&manifestCount),
+           sizeof(manifestCount));
+  for (auto const &[path, time] : m_manifestTimestamps) {
+    writeString(os, path);
+    writeString(os, time);
+  }
+
+  size_t edgeCount = m_edges.size();
+  os.write(reinterpret_cast<const char *>(&edgeCount), sizeof(edgeCount));
+  for (const auto &edge : m_edges) {
+    writeString(os, edge.from);
+    writeString(os, edge.to);
   }
 }
 
-static std::string targetTypeToString(TargetType type) {
-  switch (type) {
-  case TargetType::Executable:
-    return "executable";
-  case TargetType::StaticLibrary:
-    return "static_library";
-  case TargetType::SharedLibrary:
-    return "shared_library";
-  default:
-    return "unknown";
-  }
-}
+// ============================================================================
+// Core Graph Implementation
+// ============================================================================
 
 Graph::Graph(std::shared_ptr<ProjectManifest> rootManifest,
              const GlobalOptions &options)
     : m_options(options), m_root_manifest(rootManifest) {
   m_logger.SetPrefix("mokai");
-  populateRegistry(m_root_manifest, m_rootPrefix);
-  m_edges = buildEdges();
+
+  // Try loading binary cache to skip re-discovery
+  if (!tryLoadGraphCache() || m_options.force_rebuild) {
+    populateRegistry(m_root_manifest, m_rootPrefix);
+    m_edges = buildEdges();
+    saveGraphCache();
+  } else {
+    // We still need to populate registry data for compilation even if edges are
+    // cached
+    populateRegistry(m_root_manifest, m_rootPrefix);
+  }
 }
 
 void Graph::populateRegistry(std::shared_ptr<ProjectManifest> manifest,
@@ -159,6 +224,14 @@ void Graph::populateRegistry(std::shared_ptr<ProjectManifest> manifest,
   if (!manifest || m_processedManifests.contains(manifest.get()))
     return;
   m_processedManifests.insert(manifest.get());
+
+  // Record timestamp for caching
+  fs::path tomlPath = fs::path(manifest->base_dir) / "mokai.toml";
+  if (fs::exists(tomlPath)) {
+    m_manifestTimestamps[tomlPath.string()] = std::to_string(
+        fs::last_write_time(tomlPath).time_since_epoch().count());
+  }
+
   for (auto &target : manifest->targets) {
     std::string qn = generateQualifiedName(path_prefix, target.name);
     m_targetRegistry[qn] = {qn, target, manifest};
@@ -600,7 +673,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   std::string wd = fs::current_path().string();
   std::unique_lock<std::mutex> sl(s_mutex);
 
-  // TRIGGER GLOBAL PRE-BUILD HOOK
   if (!m_targetRegistry.empty())
     executeHooks(m_root_manifest, HookTrigger::PreBuild, "");
 
@@ -791,7 +863,7 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   }
   sl.unlock();
   {
-    std::lock_guard<std::mutex> lk(q_mutex);
+    std::lock_guard<std::mutex> lock(q_mutex);
     stop = true;
   }
   q_cv.notify_all();
@@ -814,7 +886,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     }
   }
 
-  // TRIGGER GLOBAL POST-BUILD HOOK
   if (!m_targetRegistry.empty())
     executeHooks(m_root_manifest, HookTrigger::PostBuild, "");
 
@@ -829,7 +900,22 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   }
   return true;
 }
-
+static std::string triggerToString(HookTrigger trigger) {
+  switch (trigger) {
+  case HookTrigger::PreBuild:
+    return "pre_build";
+  case HookTrigger::PostBuild:
+    return "post_build";
+  case HookTrigger::PreTargetBuild:
+    return "pre_target_build";
+  case HookTrigger::PostTargetBuild:
+    return "post_target_build";
+  case HookTrigger::FileChange:
+    return "file_change";
+  default:
+    return "unknown";
+  }
+}
 void Graph::executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
                          HookTrigger trigger, const std::string &target_name) {
   for (const auto &hook : manifest->hooks) {
@@ -839,16 +925,15 @@ void Graph::executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
     std::string ts = triggerToString(trigger);
     {
       std::lock_guard<std::mutex> l(g_log_mutex);
-      m_logger.Info("Executing structural Hook [" + hook.name + "] context '" +
-                    ts + "'");
+      m_logger.Info("Executing Hook [" + hook.name + "] context '" + ts + "'");
     }
     fs::path cp =
         fs::temp_directory_path() / ("mokai_hook_ctx_" + hook.name + ".json");
     std::ofstream ctx_file(cp);
-    ctx_file << "{\n  \"trigger\": \"" << escapeJsonString(ts) << "\",\n"
-             << "  \"project\": \"" << escapeJsonString(manifest->project.name)
-             << "\",\n"
-             << "  \"target\": \"" << escapeJsonString(target_name)
+    ctx_file << "{\n  \"trigger\": \"" << escapeJsonString(ts)
+             << "\",\n  \"project\": \""
+             << escapeJsonString(manifest->project.name)
+             << "\",\n  \"target\": \"" << escapeJsonString(target_name)
              << "\"\n}\n";
     ctx_file.close();
     std::string env_var = (
