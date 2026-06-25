@@ -2,6 +2,7 @@
 #include "config/toml.hpp"
 #include "graph/types.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
@@ -18,6 +19,28 @@
 namespace fs = std::filesystem;
 
 namespace mokai {
+
+// ============================================================================
+// Intelligent DX Engine (Levenshtein Distance for Typo Detection)
+// ============================================================================
+static size_t calculateDistance(std::string_view s1, std::string_view s2) {
+  const size_t len1 = s1.size(), len2 = s2.size();
+  std::vector<std::vector<size_t>> d(len1 + 1, std::vector<size_t>(len2 + 1));
+  for (size_t i = 0; i <= len1; ++i)
+    d[i][0] = i;
+  for (size_t j = 0; j <= len2; ++j)
+    d[0][j] = j;
+
+  for (size_t i = 1; i <= len1; ++i) {
+    for (size_t j = 1; j <= len2; ++j) {
+      size_t cost =
+          (std::tolower(s1[i - 1]) == std::tolower(s2[j - 1])) ? 0 : 1;
+      d[i][j] =
+          std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost});
+    }
+  }
+  return d[len1][len2];
+}
 
 // Inline Lightweight Semantic Versioning Engine for Robust Range Resolving
 struct SemVer {
@@ -87,28 +110,47 @@ static bool matchesRange(const std::string &versionStr,
 
 Config::Config(std::string workingDir) {
   if (!checkIsFolderAndExists(workingDir)) {
+    std::string hint = "Ensure you are targeting the correct project root.";
+    auto fuzzyDir = fuzzyFindCloseFolder(workingDir);
+    if (fuzzyDir.found) {
+      hint = "Found a similar directory '\033[1m" +
+             fs::path(fuzzyDir.best_match).filename().string() +
+             "\033[0m'. Did you make a typo?";
+    }
     m_logger.Error("Configuration Error: The specified directory does not "
                    "exist or is inaccessible:\n"
                    "  Path: \"" +
-                   workingDir + "\"");
+                   workingDir +
+                   "\"\n"
+                   "  \033[36m💡 Hint:\033[0m " +
+                   hint);
     return;
   }
 
   m_manifest.base_dir = workingDir;
 
   fs::path config_path = fs::path(workingDir) / "mokai.toml";
-  if (!checkIsFileAndExists(config_path.string())) {
+  std::string config_path_str = config_path.string();
+
+  if (!checkIsFileAndExists(config_path_str)) {
+    std::string hint =
+        "Run '\033[1mmokai create\033[0m' to scaffold a new project workspace.";
+    auto fuzzyFile = fuzzyFindCloseFile(config_path_str);
+    if (fuzzyFile.found) {
+      hint = "Found a close match named '\033[1m" +
+             fs::path(fuzzyFile.best_match).filename().string() +
+             "\033[0m'. Did you make a typo when naming the file?";
+    }
     m_logger.Error("Configuration Error: Missing project manifest file.\n"
                    "  Expected Location: \"" +
                    config_path.string() +
                    "\"\n"
-                   "  Hint: Ensure you are targeting the correct project root "
-                   "containing a 'mokai.toml'.");
+                   "  \033[36m💡 Hint:\033[0m " +
+                   hint);
     return;
   }
 
-  std::string path_str = config_path.string();
-  if (auto res = loadConfig(path_str); !res) {
+  if (auto res = loadConfig(config_path_str); !res) {
     m_logger.Error(res.error());
     return;
   }
@@ -727,8 +769,26 @@ bool Config::runTarget(const std::string &targetName) {
   }
 
   if (!matchedTarget) {
+    std::string hint =
+        "Check your 'mokai.toml' file for the exact target name.";
+    std::string best_match;
+    size_t min_dist = 4;
+    for (const auto &t : m_manifest.targets) {
+      size_t dist = calculateDistance(t.name, targetName);
+      if (dist < min_dist) {
+        min_dist = dist;
+        best_match = t.name;
+      }
+    }
+    if (!best_match.empty()) {
+      hint = "Did you mean to run '\033[1m" + best_match + "\033[0m'?";
+    }
+
     m_logger.Error("Runtime Execution Error: Target build execution node '" +
-                   targetName + "' was not found in manifest mappings.");
+                   targetName +
+                   "' was not found in manifest mappings.\n"
+                   "  \033[36m💡 Hint:\033[0m " +
+                   hint);
     return false;
   }
 
@@ -805,15 +865,26 @@ FuzzyFindResult Config::fuzzyFindCloseFile(std::string &path) {
   if (!fs::exists(parent))
     return {false, ""};
 
-  for (const auto &entry : fs::directory_iterator(parent)) {
-    if (entry.is_regular_file()) {
-      std::string entryName = entry.path().filename().string();
-      if (entryName.size() >= 3 && filename.size() >= 3 &&
-          entryName.substr(0, 3) == filename.substr(0, 3)) {
-        return {true, entry.path().string()};
+  std::string best_match;
+  size_t min_dist = 4;
+
+  try {
+    for (const auto &entry : fs::directory_iterator(parent)) {
+      if (entry.is_regular_file()) {
+        std::string entryName = entry.path().filename().string();
+        size_t dist = calculateDistance(entryName, filename);
+        if (dist < min_dist && dist > 0) { // dist > 0 prevents matching exact
+                                           // file if somehow requested
+          min_dist = dist;
+          best_match = entry.path().string();
+        }
       }
     }
+  } catch (...) {
   }
+
+  if (!best_match.empty())
+    return {true, best_match};
   return {false, ""};
 }
 
@@ -825,15 +896,25 @@ FuzzyFindResult Config::fuzzyFindCloseFolder(std::string &path) {
   if (!fs::exists(parent))
     return {false, ""};
 
-  for (const auto &entry : fs::directory_iterator(parent)) {
-    if (entry.is_directory()) {
-      std::string entryName = entry.path().filename().string();
-      if (entryName.size() >= 3 && folderName.size() >= 3 &&
-          entryName.substr(0, 3) == folderName.substr(0, 3)) {
-        return {true, entry.path().string()};
+  std::string best_match;
+  size_t min_dist = 4;
+
+  try {
+    for (const auto &entry : fs::directory_iterator(parent)) {
+      if (entry.is_directory()) {
+        std::string entryName = entry.path().filename().string();
+        size_t dist = calculateDistance(entryName, folderName);
+        if (dist < min_dist && dist > 0) {
+          min_dist = dist;
+          best_match = entry.path().string();
+        }
       }
     }
+  } catch (...) {
   }
+
+  if (!best_match.empty())
+    return {true, best_match};
   return {false, ""};
 }
 

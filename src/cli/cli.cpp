@@ -5,6 +5,7 @@
 #include "log/log.h"
 #include "templates/template.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <expected>
 #include <filesystem>
@@ -31,6 +32,64 @@
 namespace fs = std::filesystem;
 
 namespace mokai {
+
+namespace dx {
+
+static size_t calculateDistance(std::string_view s1, std::string_view s2) {
+  const size_t len1 = s1.size(), len2 = s2.size();
+  std::vector<std::vector<size_t>> d(len1 + 1, std::vector<size_t>(len2 + 1));
+  for (size_t i = 0; i <= len1; ++i)
+    d[i][0] = i;
+  for (size_t j = 0; j <= len2; ++j)
+    d[0][j] = j;
+
+  for (size_t i = 1; i <= len1; ++i) {
+    for (size_t j = 1; j <= len2; ++j) {
+      size_t cost =
+          (std::tolower(s1[i - 1]) == std::tolower(s2[j - 1])) ? 0 : 1;
+      d[i][j] =
+          std::min({d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost});
+    }
+  }
+  return d[len1][len2];
+}
+
+// Scans a directory to find a file with a typo resembling "mokai.toml"
+static std::string findClosestManifestMatch(const fs::path &dir) {
+  std::string closest_match = "";
+  size_t min_distance = 4; // Max distance to be considered a typo
+
+  if (!fs::exists(dir) || !fs::is_directory(dir))
+    return "";
+
+  try {
+    for (const auto &entry : fs::directory_iterator(dir)) {
+      if (entry.is_regular_file()) {
+        std::string filename = entry.path().filename().string();
+        size_t dist = calculateDistance(filename, "mokai.toml");
+        if (dist < min_distance &&
+            dist > 0) { // dist > 0 prevents matching exact 'mokai.toml'
+          min_distance = dist;
+          closest_match = filename;
+        }
+      }
+    }
+  } catch (...) {
+  }
+
+  return closest_match;
+}
+
+// Generates a beautiful hint string
+static std::string formatHint(const std::string &hint_text) {
+  return "\n\n  \033[36m💡 Hint:\033[0m " + hint_text;
+}
+
+} // namespace dx
+
+// ============================================================================
+// Core CLI Implementation
+// ============================================================================
 
 Cli::Cli() {
   log::Logger log;
@@ -187,8 +246,23 @@ std::expected<std::monostate, CliError> Cli::ParseCliArgs(int argc,
     return cmdToDispatch->second.callback(subCommandArgs);
   }
 
-  return std::unexpected(CliError{CliError::Code::UnknownCommand,
-                                  "Unknown command issued: '" + command + "'"});
+  // --- SMART COMMAND TYPO HINT ---
+  std::string err = "Unknown command issued: '\033[1m" + command + "\033[0m'";
+  size_t min_dist = 3;
+  std::string closest_cmd;
+  for (const auto &[cmd_name, _] : m_supported_commands) {
+    size_t dist = dx::calculateDistance(cmd_name, command);
+    if (dist < min_dist) {
+      min_dist = dist;
+      closest_cmd = cmd_name;
+    }
+  }
+  if (!closest_cmd.empty()) {
+    err += dx::formatHint("Did you mean '\033[1mmokai " + closest_cmd +
+                          "\033[0m'?");
+  }
+
+  return std::unexpected(CliError{CliError::Code::UnknownCommand, err});
 }
 
 Config *Cli::getConfig(const fs::path &tomlPath) {
@@ -250,17 +324,15 @@ printWrapped(const std::string_view &text, size_t max_line_length = 80,
       if (break_pt == std::string::npos || break_pt < start) {
         break_pt = start + current_limit;
       }
-      if (!first_line) {
+      if (!first_line)
         std::print("{}", indent);
-      }
       std::println("{}", text.substr(start, break_pt - start));
 
       start = break_pt + 1;
       first_line = false;
     } else {
-      if (!first_line) {
+      if (!first_line)
         std::print("{}", indent);
-      }
       std::println("{}", text.substr(start));
       break;
     }
@@ -285,39 +357,61 @@ Cli::handleHelp(const std::vector<std::string> &args) {
     printWrapped(help->second.explanation, 80, "          ");
     return {};
   } else {
-    return std::unexpected(
-        CliError{CliError::Code::UnknownCommand,
-                 "Help subsystem unable to locate command: '" + args[0] + "'"});
+    std::string err =
+        "Help subsystem unable to locate command: '" + args[0] + "'";
+    size_t min_dist = 3;
+    std::string closest_cmd;
+    for (const auto &[cmd_name, _] : m_supported_commands) {
+      size_t dist = dx::calculateDistance(cmd_name, args[0]);
+      if (dist < min_dist) {
+        min_dist = dist;
+        closest_cmd = cmd_name;
+      }
+    }
+    if (!closest_cmd.empty()) {
+      err += dx::formatHint("Did you mean to ask for help on '\033[1m" +
+                            closest_cmd + "\033[0m'?");
+    }
+    return std::unexpected(CliError{CliError::Code::UnknownCommand, err});
   }
 }
 
 std::expected<std::monostate, CliError>
 Cli::handleBuild(const std::vector<std::string> &args) {
   fs::path workingDir = args.empty() ? fs::current_path() : fs::path(args[0]);
-  if (!fs::exists(workingDir)) {
+
+  if (!fs::exists(workingDir) || !fs::is_directory(workingDir)) {
     return std::unexpected(
         CliError{CliError::Code::InvalidWorkspace,
-                 "Path does not exist: " + workingDir.string()});
-  }
-  if (!fs::is_directory(workingDir)) {
-    return std::unexpected(
-        CliError{CliError::Code::InvalidWorkspace,
-                 "Path is not a directory: " + workingDir.string()});
+                 "Path is not a valid directory: " + workingDir.string()});
   }
 
   workingDir = fs::absolute(workingDir).lexically_normal();
+
+  Config *currentConfig = getConfig(workingDir / "mokai.toml");
+
+  // --- SMART MANIFEST TYPO HINT ---
+  if (!currentConfig || !currentConfig->getManifest()) {
+    std::string err = "Could not find or parse a valid "
+                      "'\033[1mmokai.toml\033[0m' manifest in " +
+                      workingDir.string();
+
+    std::string closest = dx::findClosestManifestMatch(workingDir);
+    if (!closest.empty()) {
+      err +=
+          dx::formatHint("Found a close match named '\033[1m" + closest +
+                         "\033[0m'. Did you make a typo when naming the file?");
+    } else {
+      err += dx::formatHint("Run '\033[1mmokai create\033[0m' to scaffold a "
+                            "new project workspace.");
+    }
+    return std::unexpected(CliError{CliError::Code::InvalidWorkspace, err});
+  }
 
   if (m_options.verbosity != Verbosity::Quiet) {
     std::println("{}{}Initializing build target pipeline ({})...{}",
                  Style::Cyan, Style::Arrow, OS::GetPlatformName(),
                  Style::Reset);
-  }
-
-  Config *currentConfig = getConfig(workingDir / "mokai.toml");
-  if (!currentConfig) {
-    return std::unexpected(
-        CliError{CliError::Code::InvalidWorkspace,
-                 "Could not read or parse workspace configuration manifest."});
   }
 
   Graph graph(currentConfig->getManifest(), m_options);
@@ -347,20 +441,19 @@ Cli::handleRun(const std::vector<std::string> &args) {
   fs::path workingDir = fs::current_path();
 
   Config *currentConfig = getConfig(workingDir / "mokai.toml");
-  if (!currentConfig) {
-    return std::unexpected(CliError{
-        CliError::Code::InvalidWorkspace,
-        "Unable to trace workspace root configuration manifest context."});
+  if (!currentConfig || !currentConfig->getManifest()) {
+    std::string err =
+        "Unable to trace workspace root configuration manifest context.";
+    std::string closest = dx::findClosestManifestMatch(workingDir);
+    if (!closest.empty()) {
+      err += dx::formatHint(
+          "Found a close match named '\033[1m" + closest +
+          "\033[0m'. Fix the typo so mokai can run the project.");
+    }
+    return std::unexpected(CliError{CliError::Code::InvalidWorkspace, err});
   }
 
   auto manifest = currentConfig->getManifest();
-
-  if (!manifest) {
-    return std::unexpected(CliError{
-        CliError::Code::InvalidWorkspace,
-        "Unable to trace workspace root configuration manifest context."});
-  }
-
   const Target *chosenTarget = nullptr;
   std::vector<std::string> forwardArgs;
 
@@ -372,15 +465,29 @@ Cli::handleRun(const std::vector<std::string> &args) {
         break;
       }
     }
+
+    // --- SMART TARGET TYPO HINT ---
     if (!chosenTarget) {
-      return std::unexpected(
-          CliError{CliError::Code::InvalidArguments,
-                   "Explicit target lookup error: No target named '" +
-                       explicitTargetName + "' found."});
+      std::string err = "No target named '\033[1m" + explicitTargetName +
+                        "\033[0m' found in mokai.toml.";
+      size_t min_dist = 4;
+      std::string closest_target;
+      for (const auto &target : manifest->targets) {
+        size_t dist = dx::calculateDistance(target.name, explicitTargetName);
+        if (dist < min_dist) {
+          min_dist = dist;
+          closest_target = target.name;
+        }
+      }
+      if (!closest_target.empty()) {
+        err += dx::formatHint("Did you mean to run '\033[1m" + closest_target +
+                              "\033[0m'?");
+      }
+      return std::unexpected(CliError{CliError::Code::InvalidArguments, err});
     }
-    for (size_t i = 1; i < args.size(); ++i) {
+
+    for (size_t i = 1; i < args.size(); ++i)
       forwardArgs.push_back(args[i]);
-    }
   } else {
     for (const auto &target : manifest->targets) {
       if (target.is_default && target.type == TargetType::Executable) {
@@ -402,21 +509,21 @@ Cli::handleRun(const std::vector<std::string> &args) {
   if (!chosenTarget) {
     return std::unexpected(
         CliError{CliError::Code::InvalidArguments,
-                 "Execution match failure: No runable executable binary "
-                 "configurations map into this manifest workflow."});
+                 "Execution match failure: No runnable executable binary "
+                 "configurations map into this manifest."});
   }
 
   if (chosenTarget->type != TargetType::Executable) {
-    return std::unexpected(CliError{
-        CliError::Code::InvalidArguments,
-        "Target validation error: '" + chosenTarget->name +
-            "' is configured as a library rule module and cannot be run."});
+    std::string err = "Target validation error: '" + chosenTarget->name +
+                      "' is a library and cannot be run.";
+    err += dx::formatHint("Libraries cannot be executed. Create an executable "
+                          "target in your toml to test your library.");
+    return std::unexpected(CliError{CliError::Code::InvalidArguments, err});
   }
 
   auto buildRes = handleBuild({});
-  if (!buildRes.has_value()) {
+  if (!buildRes.has_value())
     return buildRes;
-  }
 
   std::string profileFolder =
       (m_options.profile == BuildProfile::Release) ? "release" : "debug";
@@ -428,11 +535,10 @@ Cli::handleRun(const std::vector<std::string> &args) {
 #endif
 
   if (!fs::exists(binaryPath)) {
-    return std::unexpected(CliError{CliError::Code::GeneralFailure,
-                                    "Artifact verification failure: Compiled "
-                                    "image was expected at target path \"" +
-                                        binaryPath.string() +
-                                        "\", but file is missing."});
+    return std::unexpected(CliError{
+        CliError::Code::GeneralFailure,
+        "Artifact verification failure: Compiled image missing at path \"" +
+            binaryPath.string() + "\""});
   }
 
   if (m_options.verbosity != Verbosity::Quiet) {
@@ -505,9 +611,8 @@ static size_t promptChoice(const std::string &title,
     }
 
     std::print("  {}(Use ↑/↓ or j/k to navigate. Enter to select", Style::Dim);
-    if (options.size() > max_visible) {
+    if (options.size() > max_visible)
       std::print(" | item {}/{}", (current_idx + 1), options.size());
-    }
     std::println("){}", Style::Reset);
     std::fflush(stdout);
 
@@ -515,18 +620,17 @@ static size_t promptChoice(const std::string &title,
     int ch = _getch();
     if (ch == 0 || ch == 0xE0) {
       ch = _getch();
-      if (ch == 72 && current_idx > 0) {
+      if (ch == 72 && current_idx > 0)
         current_idx--;
-      } else if (ch == 80 && current_idx < options.size() - 1) {
+      else if (ch == 80 && current_idx < options.size() - 1)
         current_idx++;
-      }
     } else if (ch == '\r' || ch == '\n') {
       selecting = false;
-    } else if (ch == 'k' && current_idx > 0) {
+    } else if (ch == 'k' && current_idx > 0)
       current_idx--;
-    } else if (ch == 'j' && current_idx < options.size() - 1) {
+    else if (ch == 'j' && current_idx < options.size() - 1)
       current_idx++;
-    } else if (ch == 3) {
+    else if (ch == 3) {
       std::print("\033[?25h");
       std::println("{}\nAborted via interrupt.{}", Style::Red, Style::Reset);
       std::exit(130);
@@ -534,9 +638,9 @@ static size_t promptChoice(const std::string &title,
 #else
     char ch;
     if (read(STDIN_FILENO, &ch, 1) == 1) {
-      if (ch == '\n' || ch == '\r') {
+      if (ch == '\n' || ch == '\r')
         selecting = false;
-      } else if (ch == 'k') {
+      else if (ch == 'k') {
         if (current_idx > 0)
           current_idx--;
       } else if (ch == 'j') {
@@ -569,9 +673,9 @@ static size_t promptChoice(const std::string &title,
 #endif
 
   size_t lines_to_clear = std::min(options.size(), max_visible) + 2;
-  for (size_t i = 0; i < lines_to_clear; ++i) {
+  for (size_t i = 0; i < lines_to_clear; ++i)
     std::print("\033[A\033[2K");
-  }
+
   std::println("{}{}{} {}› {}{}", Style::Green, Style::Success, title,
                Style::Dim, Style::Reset, options[current_idx]);
 
@@ -581,9 +685,8 @@ static size_t promptChoice(const std::string &title,
 static std::string promptText(const std::string &prompt,
                               const std::string &default_val = "") {
   std::print("{}{}{}{}", Style::Green, Style::Arrow, Style::Reset, prompt);
-  if (!default_val.empty()) {
+  if (!default_val.empty())
     std::print("{} ({}){}", Style::Dim, default_val, Style::Reset);
-  }
   std::print(" ");
   std::fflush(stdout);
 
@@ -600,9 +703,15 @@ std::expected<std::monostate, CliError>
 Cli::handlePackageAdd(const std::vector<std::string> &args) {
   fs::path tomlPath = fs::current_path() / "mokai.toml";
   if (!fs::exists(tomlPath)) {
-    return std::unexpected(CliError{CliError::Code::InvalidWorkspace,
-                                    "Active workspace error: No 'mokai.toml' "
-                                    "file found in current context root"});
+    std::string err = "Active workspace error: No 'mokai.toml' file found in "
+                      "current context root";
+    std::string closest = dx::findClosestManifestMatch(fs::current_path());
+    if (!closest.empty()) {
+      err += dx::formatHint(
+          "Found '\033[1m" + closest +
+          "\033[0m'. Please fix the typo to inject dependencies safely.");
+    }
+    return std::unexpected(CliError{CliError::Code::InvalidWorkspace, err});
   }
 
   std::string chosenPackage = "";
@@ -747,39 +856,6 @@ Cli::handlePackageAdd(const std::vector<std::string> &args) {
   return {};
 }
 
-static void processTemplatePlaceholders(const fs::path &file_path,
-                                        const std::string &project_name,
-                                        const std::string &cpp_version) {
-  if (!fs::exists(file_path))
-    return;
-
-  std::ifstream in_file(file_path);
-  if (!in_file.is_open())
-    return;
-
-  std::stringstream buffer;
-  buffer << in_file.rdbuf();
-  std::string content = buffer.str();
-  in_file.close();
-
-  auto replace_all = [](std::string &str, const std::string &from,
-                        const std::string &to) {
-    size_t start_pos = 0;
-    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
-      str.replace(start_pos, from.length(), to);
-      start_pos += to.length();
-    }
-  };
-
-  replace_all(content, "{{PROJECT_NAME}}", project_name);
-  replace_all(content, "{{CPP_VERSION}}", cpp_version);
-
-  std::ofstream out_file(file_path);
-  if (out_file.is_open()) {
-    out_file << content;
-  }
-}
-
 std::expected<std::monostate, CliError>
 Cli::handleCreateProject(const std::vector<std::string> &args) {
   std::println("\n{}{}✨ Mokai Initializer {}{}– Create a new environment{}",
@@ -818,8 +894,8 @@ Cli::handleCreateProject(const std::vector<std::string> &args) {
   if (raw_available.empty()) {
     return std::unexpected(
         CliError{CliError::Code::GeneralFailure,
-                 "Template Engine Error: No embedded "
-                 "blueprint skeletons found inside the binary"});
+                 "Template Engine Error: No embedded blueprint skeletons found "
+                 "inside the binary"});
   }
 
   std::vector<std::string> available_templates;
