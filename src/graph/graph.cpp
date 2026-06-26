@@ -301,7 +301,6 @@ static std::vector<std::string> readVector(std::istream &is) {
 Graph::Graph(std::shared_ptr<ProjectManifest> rootManifest,
              const GlobalOptions &options)
     : m_options(options), m_root_manifest(rootManifest) {
-  m_logger.SetLevel(mokai::log::Level::Debug);
   m_logger.SetPrefix("mokai");
   if (!tryLoadGraphCache() || m_options.force_rebuild) {
     populateRegistry(m_root_manifest, m_rootPrefix);
@@ -857,13 +856,8 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
           p = fs::absolute(fs::path(manifest_base) / raw_p);
         std::string final_path = p.lexically_normal().string();
         std::string flag = (tc.is_msvc ? "/I" : "-I") + final_path;
-        if (unique_includes.insert(flag).second) {
-          std::cout << " ℹ [DEBUG] " << target_qn
-                    << " <- added include: " << final_path << std::endl;
-        }
       };
 
-      // 1. Resolve local manifest includes
       for (const auto &i : qt->target.include_dirs)
         add_inc_safe(cr, i, qt->manifest->base_dir);
       for (const auto &i : qt->manifest->project.include_dirs)
@@ -872,7 +866,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         for (const auto &i : qt->manifest->exports->include_dirs)
           add_inc_safe(cr, i, qt->manifest->base_dir);
 
-      // 2. Resolve every dependency found in the current manifest hierarchy
       auto resolve_recursive_includes =
           [&](auto &self, std::shared_ptr<ProjectManifest> m) -> void {
         for (auto const &[name, dep] : m->resolved_dependencies) {
@@ -890,7 +883,6 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       resolve_recursive_includes(resolve_recursive_includes, qt->manifest);
       for (const auto &inc : unique_includes)
         b_args->push_back(inc);
-      // --- END INCLUDE RESOLUTION ---
 
       for (const auto &pr : qt->target.getActiveProperties(ev)) {
         if (pr.starts_with("@")) {
