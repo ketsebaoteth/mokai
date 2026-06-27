@@ -7,7 +7,7 @@ GREEN="\033[32m"
 CYAN="\033[36m"
 DIM="\033[2m"
 
-VERSION="0.0.2-alpha"
+VERSION="0.0.3"
 INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 
