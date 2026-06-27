@@ -6,6 +6,7 @@
 #include "log/log.h"
 #include <expected>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -14,6 +15,11 @@
 namespace mokai {
 
 struct GlobalOptions;
+
+static std::mutex g_log_mutex;
+
+constexpr uint32_t MOKAI_CACHE_MAGIC = 0x4D4F4B41; // "MOKA"
+constexpr uint32_t MOKAI_CACHE_VERSION = 1;
 
 class Graph {
 public:
@@ -35,6 +41,12 @@ public:
 
   void executeHooks(const std::shared_ptr<ProjectManifest> &manifest,
                     HookTrigger trigger, const std::string &target_name);
+
+  void writeString(std::ostream &os, const std::string &s);
+  std::string readString(std::istream &is);
+  void writeVector(std::ostream &os, const std::vector<std::string> &v);
+  std::vector<std::string> readVector(std::istream &is);
+  std::string escapeJsonString(const std::string &input);
 
 private:
   void populateRegistry(std::shared_ptr<ProjectManifest> manifest,
@@ -77,13 +89,24 @@ private:
   const ConditionEngine &getConditionEngine() const {
     return *m_conditionEngine;
   }
+  struct BuildRecord {
+    std::string source, timestamp, hash;
+  };
+  using StateCacheMap =
+      std::unordered_map<std::string, std::pair<std::string, std::string>>;
+
+  class BuildPipeline;
+
+  int executeCommandFast(const std::vector<std::string> &args);
+  std::string
+  getNormalizedFileTimestamp(const std::filesystem::path &path) const;
 
   // Private Member Data fields
   std::unique_ptr<ConditionEngine> m_conditionEngine;
   std::unique_ptr<ICompiler> m_compiler;
   enum class NodeState { Unvisited, Visiting, Done };
 
-  mokai::log::Logger m_logger;
+  mutable mokai::log::Logger m_logger;
   const GlobalOptions &m_options;
 
   std::unordered_map<std::string, QualifiedTarget> m_targetRegistry;

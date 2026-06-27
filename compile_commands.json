@@ -31,8 +31,18 @@
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graph_cond.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/graph_cond.cpp"
+    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graphBuildPipeline.cpp\"",
+    "file": "/home/k/Documents/mokai/src/graph/graphBuildPipeline.cpp"
+  },
+  {
+    "directory": "/home/k/Documents/mokai",
+    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graphCache.cpp\"",
+    "file": "/home/k/Documents/mokai/src/graph/graphCache.cpp"
+  },
+  {
+    "directory": "/home/k/Documents/mokai",
+    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graphSeralize.cpp\"",
+    "file": "/home/k/Documents/mokai/src/graph/graphSeralize.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
@@ -48,5 +58,15 @@
     "directory": "/home/k/Documents/mokai",
     "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/templates/template.cpp\"",
     "file": "/home/k/Documents/mokai/src/templates/template.cpp"
+  },
+  {
+    "directory": "/home/k/Documents/mokai",
+    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/entery.cpp\"",
+    "file": "/home/k/Documents/mokai/src/entery.cpp"
+  },
+  {
+    "directory": "/home/k/Documents/mokai",
+    "command": "/usr/bin/clang++ -std=c++23 -g -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/tests/conditions.cpp\"",
+    "file": "/home/k/Documents/mokai/src/tests/conditions.cpp"
   }
 ]

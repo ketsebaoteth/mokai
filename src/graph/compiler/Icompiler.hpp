@@ -11,7 +11,6 @@ class ICompiler {
 public:
   virtual ~ICompiler() = default;
 
-  // returns the known paths discovered beforehand
   virtual std::string getCompilerBinary(bool is_c) const = 0;
   virtual std::string getArchiverBinary() const = 0;
 
