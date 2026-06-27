@@ -188,9 +188,11 @@ std::expected<std::monostate, CliError> Cli::ParseCliArgs(int argc,
     } else if (arg == "-q" || arg == "--quiet") {
       m_options.verbosity = Verbosity::Quiet;
     } else if (arg == "--release") {
-      m_options.profile = BuildProfile::Release;
+      m_options.profile = BuildProfile::RELEASE;
     } else if (arg == "--debug") {
-      m_options.profile = BuildProfile::Debug;
+      m_options.profile = BuildProfile::DEBUG;
+    } else if (arg == "--minsizerel") {
+      m_options.profile = BuildProfile::MINSIZEREL;
     } else if (arg == "--no-cache" || arg == "--clean") {
       m_options.force_rebuild = true;
     } else if (arg == "-j" || arg == "--jobs") {
@@ -286,7 +288,7 @@ Config *Cli::getConfig(const fs::path &tomlPath) {
     if (exists) {
       it->second.last_modified = current_time;
       it->second.config =
-          std::make_unique<Config>(tomlPath.parent_path().string());
+          std::make_unique<Config>(tomlPath.parent_path().string(), m_options);
     } else {
       m_config_registry.erase(it);
       return nullptr;
@@ -297,7 +299,8 @@ Config *Cli::getConfig(const fs::path &tomlPath) {
   if (exists) {
     ConfigCacheEntry entry;
     entry.last_modified = current_time;
-    entry.config = std::make_unique<Config>(tomlPath.parent_path().string());
+    entry.config =
+        std::make_unique<Config>(tomlPath.parent_path().string(), m_options);
 
     auto [insertedIt, success] =
         m_config_registry.emplace(pathStr, std::move(entry));
@@ -390,7 +393,6 @@ Cli::handleBuild(const std::vector<std::string> &args) {
 
   Config *currentConfig = getConfig(workingDir / "mokai.toml");
 
-  // --- SMART MANIFEST TYPO HINT ---
   if (!currentConfig || !currentConfig->getManifest()) {
     std::string err = "Could not find or parse a valid "
                       "'\033[1mmokai.toml\033[0m' manifest in " +
@@ -414,7 +416,14 @@ Cli::handleBuild(const std::vector<std::string> &args) {
                  Style::Reset);
   }
 
-  Graph graph(currentConfig->getManifest(), m_options);
+  auto graph_result = Graph::Create(currentConfig->getManifest(), m_options);
+  if (!graph_result) {
+    m_logger.Error("Failed to initialize dependency graph: " +
+                   graph_result.error());
+    return {};
+  }
+
+  Graph graph = std::move(graph_result.value());
 
   auto buildOrder = graph.computeBuildOrder(graph.getEdges());
   if (buildOrder.empty()) {
@@ -526,7 +535,7 @@ Cli::handleRun(const std::vector<std::string> &args) {
     return buildRes;
 
   std::string profileFolder =
-      (m_options.profile == BuildProfile::Release) ? "release" : "debug";
+      (m_options.profile == BuildProfile::RELEASE) ? "release" : "debug";
   fs::path binaryPath =
       fs::path("./build") / profileFolder / chosenTarget->name;
 

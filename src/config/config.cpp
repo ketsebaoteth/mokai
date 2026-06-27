@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "cli/cli.hpp"
 #include "config/toml.hpp"
 #include "graph/types.hpp"
 #include <algorithm>
@@ -13,7 +14,7 @@
 #include <vector>
 
 #if !defined(_WIN32) && !defined(_WIN64)
-#include <sys/wait.h> // POSIX/Linux process macro status decoding
+#include <sys/wait.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -42,70 +43,6 @@ static size_t calculateDistance(std::string_view s1, std::string_view s2) {
   return d[len1][len2];
 }
 
-// Inline Lightweight Semantic Versioning Engine for Robust Range Resolving
-struct SemVer {
-  int major = 0;
-  int minor = 0;
-  int patch = 0;
-
-  static SemVer parse(std::string s) {
-    SemVer v;
-    if (s.empty())
-      return v;
-    if (s[0] == 'v' || s[0] == 'V')
-      s = s.substr(1);
-    std::replace(s.begin(), s.end(), '.', ' ');
-    std::stringstream ss(s);
-    ss >> v.major >> v.minor >> v.patch;
-    return v;
-  }
-
-  auto operator<=>(const SemVer &) const = default;
-};
-
-static bool satisfiesConstraint(const SemVer &version,
-                                const std::string &constraint) {
-  std::string clean = constraint;
-  clean.erase(std::remove_if(clean.begin(), clean.end(), ::isspace),
-              clean.end());
-  if (clean.empty())
-    return true;
-
-  size_t numIdx = clean.find_first_of("0123456789vV");
-  if (numIdx == std::string::npos)
-    return false;
-
-  std::string op = clean.substr(0, numIdx);
-  SemVer target = SemVer::parse(clean.substr(numIdx));
-
-  if (op == ">=")
-    return version >= target;
-  if (op == "<")
-    return version < target;
-  if (op == "<=")
-    return version <= target;
-  if (op == ">")
-    return version > target;
-  if (op == "==" || op.empty())
-    return version == target;
-  return false;
-}
-
-static bool matchesRange(const std::string &versionStr,
-                         const std::string &rangeStr) {
-  if (rangeStr.empty() || rangeStr == "*")
-    return true;
-  SemVer v = SemVer::parse(versionStr);
-
-  std::stringstream ss(rangeStr);
-  std::string token;
-  while (std::getline(ss, token, ',')) {
-    if (!satisfiesConstraint(v, token))
-      return false;
-  }
-  return true;
-}
-
 // ============================================================================
 // Global Paths Engine
 // ============================================================================
@@ -119,7 +56,7 @@ static fs::path getGlobalMokaiDir() {
 #endif
 }
 
-Config::Config(std::string workingDir) {
+Config::Config(std::string workingDir, GlobalOptions &ops) {
   if (!checkIsFolderAndExists(workingDir)) {
     std::string hint = "Ensure you are targeting the correct project root.";
     auto fuzzyDir = fuzzyFindCloseFolder(workingDir);
@@ -171,7 +108,7 @@ Config::Config(std::string workingDir) {
       m_logger.Error(res.error());
     return;
   }
-  if (auto res = extractProjectData(); !res) {
+  if (auto res = extractProjectData(ops); !res) {
     m_logger.Error("Manifest Validation Error: Failed to build project model "
                    "from 'mokai.toml'.");
     m_logger.Error(res.error());
@@ -231,7 +168,8 @@ std::expected<void, std::string> Config::parseConfig() {
   return {};
 }
 
-std::expected<void, std::string> Config::extractProjectData() {
+std::expected<void, std::string>
+Config::extractProjectData(GlobalOptions &ops) {
   auto extract_string_array = [](auto &&node_view,
                                  std::vector<std::string> &dest) {
     if (auto *arr = node_view.as_array()) {
@@ -262,6 +200,10 @@ std::expected<void, std::string> Config::extractProjectData() {
   metadata.description = projectTable["description"].value_or("");
   metadata.homepage = projectTable["homepage"].value_or("");
   metadata.default_target = projectTable["default_target"].value_or("");
+
+  if (ops.default_compiler.empty()) {
+    ops.default_compiler = projectTable["default_compiler"].value_or("");
+  }
 
   if (auto *vf_table = projectTable["version_from"].as_table()) {
     VersionFromSpec vf;
@@ -302,7 +244,7 @@ std::expected<void, std::string> Config::extractProjectData() {
           }
 
           fs::path canonical_path = fs::canonical(dep_path);
-          Config depconfig(canonical_path.string());
+          Config depconfig(canonical_path.string(), ops);
           DependencySpec spec{depStr, ""};
           m_manifest.resolved_dependencies[depStr] =
               ResolvedDependency{spec, depconfig.getManifest()};
@@ -312,9 +254,6 @@ std::expected<void, std::string> Config::extractProjectData() {
               "Package Router Error: Direct 'git:' dependencies have been "
               "deprecated. Please use the Global Registry.");
         } else {
-          // ============================================================================
-          // NEW GLOBAL REGISTRY PACKAGE MANAGER ROUTER
-          // ============================================================================
           std::string pkgName = depStr;
           std::string pkgVersionSpec = "latest";
           size_t versionDelim = depStr.find('@');
@@ -331,7 +270,7 @@ std::expected<void, std::string> Config::extractProjectData() {
                           "for the first time...");
             fs::create_directories(registryDir.parent_path());
             std::string regCloneCmd =
-                "git clone --progress "
+                "git clone --depth=1 --progress "
                 "https://github.com/L1TerminalFault/mokai_confs " +
                 registryDir.string();
             if (std::system(regCloneCmd.c_str()) != 0) {
@@ -343,8 +282,6 @@ std::expected<void, std::string> Config::extractProjectData() {
 
           fs::path manifestRecipeFile = registryDir / (pkgName + ".toml");
 
-          // Sync the registry if the requested package doesn't exist locally
-          // yet
           if (!fs::exists(manifestRecipeFile)) {
             m_logger.Info("Package Router: Package '" + pkgName +
                           "' not found locally. Syncing registry...");
@@ -364,7 +301,6 @@ std::expected<void, std::string> Config::extractProjectData() {
 
             try {
               auto rootRegistryNode = toml::parse(rStream.str());
-
               std::string gitRepo = rootRegistryNode["project"]["git_repo"]
                                         .value<std::string>()
                                         .value_or("");
@@ -379,7 +315,6 @@ std::expected<void, std::string> Config::extractProjectData() {
                 packageGitUrl = "https://github.com/" + packageGitUrl;
               }
 
-              // Extract the embedded inline TOML recipe string
               std::string recipeTomlContent = "";
               if (auto *recipesTable = rootRegistryNode["recipes"].as_table()) {
                 if (auto specNode = recipesTable->get(pkgVersionSpec)) {
@@ -416,15 +351,12 @@ std::expected<void, std::string> Config::extractProjectData() {
                 }
               }
 
-              // Write the embedded registry TOML recipe out to the package
-              // directory
               fs::path destinationConfTarget = targetPkgBuildDir / "mokai.toml";
               std::ofstream outToml(destinationConfTarget.string());
               outToml << recipeTomlContent;
               outToml.close();
 
-              // Recursively evaluate the newly injected package
-              Config depconfig(targetPkgBuildDir.string());
+              Config depconfig(targetPkgBuildDir.string(), ops);
               DependencySpec spec{depStr, pkgVersionSpec};
               m_manifest.resolved_dependencies[pkgName] =
                   ResolvedDependency{spec, depconfig.getManifest()};
@@ -517,50 +449,6 @@ std::expected<void, std::string> Config::extractProjectData() {
         extract_string_array((*inner_table)["flags"], target.flags);
         extract_string_array((*inner_table)["system_libs"], target.system_libs);
         extract_string_array((*inner_table)["depends_on"], target.depends_on);
-
-        if (auto *s_if_arr = (*inner_table)["sources_if"].as_array()) {
-          for (auto &&el : *s_if_arr) {
-            if (auto *tbl = el.as_table()) {
-              ConditionalSources cs;
-              cs.condition = (*tbl)["condition"].value_or("");
-              extract_string_array((*tbl)["patterns"], cs.patterns);
-              target.sources_if.push_back(std::move(cs));
-            }
-          }
-        }
-
-        if (auto *f_if_arr = (*inner_table)["flags_if"].as_array()) {
-          for (auto &&el : *f_if_arr) {
-            if (auto *tbl = el.as_table()) {
-              ConditionalFlags cf;
-              cf.condition = (*tbl)["condition"].value_or("");
-              extract_string_array((*tbl)["flags"], cf.flags);
-              target.flags_if.push_back(std::move(cf));
-            }
-          }
-        }
-
-        if (auto *p_if_arr = (*inner_table)["properties_if"].as_array()) {
-          for (auto &&el : *p_if_arr) {
-            if (auto *tbl = el.as_table()) {
-              ConditionalProperties cp;
-              cp.condition = (*tbl)["condition"].value_or("");
-              extract_string_array((*tbl)["defines"], cp.defines);
-              target.properties_if.push_back(std::move(cp));
-            }
-          }
-        }
-
-        if (auto *sys_if_arr = (*inner_table)["system_libs_if"].as_array()) {
-          for (auto &&el : *sys_if_arr) {
-            if (auto *tbl = el.as_table()) {
-              ConditionalSystemLibs csl;
-              csl.condition = (*tbl)["condition"].value_or("");
-              extract_string_array((*tbl)["libs"], csl.libs);
-              target.system_libs_if.push_back(std::move(csl));
-            }
-          }
-        }
 
         m_manifest.targets.push_back(std::move(target));
       }
@@ -754,7 +642,8 @@ bool Config::runTarget(const std::string &targetName) {
     m_logger.Error("Compilation Mismatch: Executable target binary not found "
                    "at pathway location:\n  Path: \"" +
                    absoluteOutputBinPath.string() +
-                   "\"\n  Hint: Build the pipeline layout target tracking "
+                   "\"\n"
+                   "  Hint: Build the pipeline layout target tracking "
                    "dependencies before launching execution units.");
     return false;
   }

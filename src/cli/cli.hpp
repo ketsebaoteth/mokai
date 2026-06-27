@@ -33,25 +33,21 @@ inline constexpr std::string_view Info = "ℹ ";
 inline constexpr std::string_view Error = "✖ ";
 } // namespace Style
 
-enum class BuildProfile { Debug, Release };
+enum class BuildProfile { DEBUG, RELEASE, MINSIZEREL };
 
 struct GlobalOptions {
   std::filesystem::path root_dir = std::filesystem::current_path();
   Verbosity verbosity = Verbosity::Default;
   ColorMode color = ColorMode::Auto;
 
-  // Core Engine Refactoring Flags
-  BuildProfile profile = BuildProfile::Debug;
+  BuildProfile profile = BuildProfile::DEBUG;
   int job_count = 0;
   std::string target_filter = "";
   bool force_rebuild = false;
 
-  // Cross-Platform Mapping Adjustments
   Platform target_platform = OS::GetCurrentPlatform();
-
-  // Custom compiler/toolchain flag overrides configured during CLI ingestion
-  // loops
   std::vector<std::string> user_compiler_flags;
+  std::string default_compiler;
 };
 
 // Based on POSIX standard

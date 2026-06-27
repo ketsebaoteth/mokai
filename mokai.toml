@@ -1,7 +1,7 @@
 [project]
 name = "mokai"
 cpp_version = "c++23"
-include_dirs = ["src"]
+include_dirs = ["src", "tests"]
 
 [target.MOKAI]
 type = "static_library"
@@ -12,10 +12,18 @@ sources = [
     "src/cli/**/*.cpp",
     "src/log/**/*.cpp",
     "src/templates/**/*.cpp",
-    "src/core/**/*.cpp"
+    "src/core/**/*.cpp",
 ]
 
 [target.mokai]
 type = "executable"
 sources = ["src/entery.cpp"]
 depends_on = ["MOKAI"]
+
+[target.mokai_tests]
+type = "executable"
+sources = [
+    "src/tests/conditions.cpp",
+]
+depends_on = ["MOKAI"]
+

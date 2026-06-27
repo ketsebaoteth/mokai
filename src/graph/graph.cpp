@@ -1,7 +1,9 @@
 #include "graph.hpp"
 #include "cli/cli.hpp"
+#include "graph/compiler/ToolChainFinder.hpp"
 #include "graph/types.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -16,6 +18,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -36,226 +39,73 @@ namespace mokai {
 
 static std::mutex g_log_mutex;
 
-inline bool safe_isspace(unsigned char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' ||
-         c == '\r';
-}
-
-static std::vector<std::string> tokenizeCondition(const std::string &expr) {
-  std::vector<std::string> tokens;
-  std::string cur;
-  for (size_t i = 0; i < expr.size(); ++i) {
-    char c = expr[i];
-    if (safe_isspace(static_cast<unsigned char>(c))) {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-    } else if (c == '(' || c == ')' || c == '!') {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-      tokens.push_back(std::string(1, c));
-    } else if (i + 1 < expr.size() && expr.substr(i, 2) == "&&") {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-      tokens.push_back("&&");
-      i++;
-    } else if (i + 1 < expr.size() && expr.substr(i, 2) == "||") {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-      tokens.push_back("||");
-      i++;
-    } else if (i + 1 < expr.size() && expr.substr(i, 2) == "==") {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-      tokens.push_back("==");
-      i++;
-    } else if (i + 1 < expr.size() && expr.substr(i, 2) == "!=") {
-      if (!cur.empty()) {
-        tokens.push_back(cur);
-        cur.clear();
-      }
-      tokens.push_back("!=");
-      i++;
-    } else {
-      cur += c;
-    }
-  }
-  if (!cur.empty())
-    tokens.push_back(cur);
-  return tokens;
-}
-
-static bool evalAtom(const std::string &left, const std::string &op,
-                     const std::string &right, const Target &target,
-                     const std::shared_ptr<ProjectManifest> &manifest,
-                     Graph *graphInstance) {
-  if (left == "os") {
-#if defined(_WIN32) || defined(_WIN64)
-    return (op == "==" ? right == "windows" : right != "windows");
-#elif defined(__APPLE__)
-    return (op == "==" ? right == "macos" : right != "macos");
-#else
-    return (op == "==" ? right == "linux" : right != "linux");
-#endif
-  } else if (left == "compiler") {
-    std::string act = "gcc";
-#if defined(__clang__)
-    act = "clang";
-#elif defined(_MSC_VER)
-    act = "msvc";
-#endif
-    return (op == "==" ? act == right : act != right);
-  } else if (left.rfind("options.", 0) == 0) {
-    std::string k = left.substr(8);
-    bool val = manifest->options.count(k) && manifest->options.at(k);
-    if (op == "==")
-      return (right == "true" ? val : !val);
-    if (op == "!=")
-      return (right == "true" ? !val : val);
-  }
-  return graphInstance->evaluateCond(left + " " + op + " " + right);
-}
-
-static bool parseExpr(const std::vector<std::string> &tokens, size_t &pos,
-                      const Target &target,
-                      const std::shared_ptr<ProjectManifest> &manifest,
-                      Graph *graphInstance);
-static bool parseTerm(const std::vector<std::string> &tokens, size_t &pos,
-                      const Target &target,
-                      const std::shared_ptr<ProjectManifest> &manifest,
-                      Graph *graphInstance);
-static bool parseFactor(const std::vector<std::string> &tokens, size_t &pos,
-                        const Target &target,
-                        const std::shared_ptr<ProjectManifest> &manifest,
-                        Graph *graphInstance);
-
-static bool parseExpr(const std::vector<std::string> &tokens, size_t &pos,
-                      const Target &target,
-                      const std::shared_ptr<ProjectManifest> &manifest,
-                      Graph *graphInstance) {
-  bool val = parseTerm(tokens, pos, target, manifest, graphInstance);
-  while (pos < tokens.size() && tokens[pos] == "||") {
-    pos++;
-    val = val || parseTerm(tokens, pos, target, manifest, graphInstance);
-  }
-  return val;
-}
-
-static bool parseTerm(const std::vector<std::string> &tokens, size_t &pos,
-                      const Target &target,
-                      const std::shared_ptr<ProjectManifest> &manifest,
-                      Graph *graphInstance) {
-  bool val = parseFactor(tokens, pos, target, manifest, graphInstance);
-  while (pos < tokens.size() && tokens[pos] == "&&") {
-    pos++;
-    val = val && parseFactor(tokens, pos, target, manifest, graphInstance);
-  }
-  return val;
-}
-
-static bool parseFactor(const std::vector<std::string> &tokens, size_t &pos,
-                        const Target &target,
-                        const std::shared_ptr<ProjectManifest> &manifest,
-                        Graph *graphInstance) {
-  if (pos >= tokens.size())
-    return false;
-  if (tokens[pos] == "!") {
-    pos++;
-    return !parseFactor(tokens, pos, target, manifest, graphInstance);
-  }
-  if (tokens[pos] == "(") {
-    pos++;
-    bool val = parseExpr(tokens, pos, target, manifest, graphInstance);
-    if (pos < tokens.size() && tokens[pos] == ")")
-      pos++;
-    return val;
-  }
-  std::string left = tokens[pos++];
-  if (pos < tokens.size() && (tokens[pos] == "==" || tokens[pos] == "!=")) {
-    std::string op = tokens[pos++];
-    if (pos >= tokens.size())
-      return false;
-    std::string right = tokens[pos++];
-    return evalAtom(left, op, right, target, manifest, graphInstance);
-  }
-  if (left.rfind("options.", 0) == 0) {
-    std::string k = left.substr(8);
-    return manifest->options.count(k) && manifest->options.at(k);
-  }
-  return graphInstance->evaluateCond(left);
-}
-
 static int executeCommandFast(const std::vector<std::string> &args) {
   if (args.empty())
     return -1;
-#if defined(_WIN32) || defined(_WIN64)
-  std::string command;
+#ifdef _WIN32
+  // flatten the arguments into a single raw command-line string layout
+  std::string cmdLine = "";
   for (size_t i = 0; i < args.size(); ++i) {
-    command += args[i];
-    if (i + 1 < args.size())
-      command += " ";
+    cmdLine += (i > 0 ? " \"" : "\"") + args[i] + "\"";
   }
+
   STARTUPINFOA si;
   PROCESS_INFORMATION pi;
-  ZeroMemory(&si, sizeof(si));
+  SecureZeroMemory(&si, sizeof(si));
   si.cb = sizeof(si);
-  ZeroMemory(&pi, sizeof(pi));
-  std::vector<char> cmd_buffer(command.begin(), command.end());
-  cmd_buffer.push_back('\0');
-  if (CreateProcessA(NULL, cmd_buffer.data(), NULL, NULL, FALSE, 0, NULL, NULL,
-                     &si, &pi)) {
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return static_cast<int>(exitCode);
+  SecureZeroMemory(&pi, sizeof(pi));
+
+  if (!CreateProcessA(nullptr, &cmdLine[0], nullptr, nullptr, TRUE, 0, nullptr,
+                      nullptr, &si, &pi)) {
+    return -1;
   }
-  return -1;
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exitCode = 0;
+  GetExitCodeProcess(pi.hProcess, &exitCode);
+
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+  return static_cast<int>(exitCode);
+
 #else
-  std::vector<char *> c_args;
-  for (const auto &arg : args)
-    c_args.push_back(const_cast<char *>(arg.c_str()));
-  c_args.push_back(nullptr);
-  pid_t pid;
-  int status;
-  if (posix_spawnp(&pid, c_args[0], NULL, NULL, c_args.data(), environ) == 0) {
-    if (waitpid(pid, &status, 0) != -1 && WIFEXITED(status))
+  // POSIX Linux, macOS, BSD
+  std::vector<char *> argv;
+  argv.reserve(args.size() + 1);
+  for (const auto &arg : args) {
+    argv.push_back(const_cast<char *>(arg.c_str()));
+  }
+  argv.push_back(
+      nullptr); // POSIX requires a trailing null pointer to terminate the array
+
+  pid_t pid = fork();
+
+  if (pid < 0) {
+    // Forking failed entirely at the OS level
+    return -1;
+  } else if (pid == 0) {
+    // Execute the binary directly. This replaces the child process memory space
+    // with the compiler (gcc/clang)
+    execvp(argv[0], argv.data());
+
+    // If execvp returns, it means the binary wasn't found or isn't executable
+    _exit(127);
+  } else {
+    int status = 0;
+    if (waitpid(pid, &status, 0) == -1) {
+      return -1;
+    }
+    // Explicit crash and signal handling verification
+    if (WIFEXITED(status)) {
       return WEXITSTATUS(status);
-  }
-  return -1;
-#endif
-}
+    } else if (WIFSIGNALED(status)) {
+      // Child was abnormally terminated or crashed by a signal
+      return -1;
+    }
 
-struct Toolchain {
-  std::string cpp_compiler, c_compiler, archiver;
-  bool is_msvc = false;
-};
-
-static Toolchain discoverToolchain() {
-  static Toolchain cached;
-  static bool done = false;
-  if (!done) {
-    const char *env_cxx = std::getenv("CXX"), *env_cc = std::getenv("CC");
-    cached.cpp_compiler = env_cxx ? env_cxx : "clang++";
-    cached.c_compiler = env_cc ? env_cc : "clang";
-    cached.archiver = "ar";
-#if defined(_WIN32) || defined(_WIN64)
-    if (std::system("where cl > NUL 2>&1") == 0)
-      cached = {"cl", "cl", "lib", true};
-#endif
-    done = true;
+    return -1;
   }
-  return cached;
+#endif
 }
 
 static std::string escapeJsonString(const std::string &input) {
@@ -297,24 +147,31 @@ static std::vector<std::string> readVector(std::istream &is) {
     v[i] = readString(is);
   return v;
 }
+std::expected<Graph, std::string>
+Graph::Create(std::shared_ptr<ProjectManifest> rootManifest,
+              const GlobalOptions &options) {
+  mokai::log::Logger init_logger;
+  ToolchainFinder finder(init_logger);
+  auto result = finder.discover(options.default_compiler);
 
-Graph::Graph(std::shared_ptr<ProjectManifest> rootManifest,
-             const GlobalOptions &options)
-    : m_options(options), m_root_manifest(rootManifest) {
-  m_logger.SetPrefix("mokai");
-  if (!tryLoadGraphCache() || m_options.force_rebuild) {
-    populateRegistry(m_root_manifest, m_rootPrefix);
-    m_edges = buildEdges();
-    saveGraphCache();
-  } else {
-    populateRegistry(m_root_manifest, m_rootPrefix);
+  if (!result) {
+    return std::unexpected(result.error());
   }
+
+  return Graph(std::move(rootManifest), options, std::move(result.value()));
 }
 
+Graph::Graph(std::shared_ptr<ProjectManifest> rootManifest,
+             const GlobalOptions &options, std::unique_ptr<ICompiler> compiler)
+    : m_root_manifest(std::move(rootManifest)), m_options(options), m_logger(),
+      m_conditionEngine(std::make_unique<ConditionEngine>()),
+      m_compiler(std::move(compiler)) {
+  populateRegistry(m_root_manifest, m_rootPrefix);
+  m_edges = buildEdges();
+}
 std::string Graph::getCachePath() const {
   return (fs::path(".mokai") / "graph.bin").string();
 }
-
 bool Graph::tryLoadGraphCache() {
   std::string path = getCachePath();
   if (!fs::exists(path))
@@ -377,7 +234,7 @@ void Graph::saveGraphCache() {
 }
 
 void Graph::populateRegistry(std::shared_ptr<ProjectManifest> manifest,
-                             const std::string &path_prefix) {
+                             const std::string_view path_prefix) {
   if (!manifest || m_processedManifests.contains(manifest.get()))
     return;
   m_processedManifests.insert(manifest.get());
@@ -393,15 +250,17 @@ void Graph::populateRegistry(std::shared_ptr<ProjectManifest> manifest,
   }
   for (auto &[dep_key, resolved] : manifest->resolved_dependencies) {
     if (resolved.manifest)
-      populateRegistry(resolved.manifest, path_prefix + m_packageSeparator +
+      populateRegistry(resolved.manifest, std::string(path_prefix) +
+                                              std::string(m_packageSeparator) +
                                               resolved.manifest->project.name);
   }
 }
 
-std::string Graph::generateQualifiedName(const std::string &prefix,
-                                         const std::string &name) const {
-  return prefix + m_namespaceSeparator + name;
+std::string Graph::generateQualifiedName(const std::string_view prefix,
+                                         const std::string_view name) const {
+  return std::string(prefix) + m_namespaceSeparator.data() + name.data();
 }
+
 const QualifiedTarget *
 Graph::FindByQualifiedName(const std::string &qualified_name) const {
   auto it = m_targetRegistry.find(qualified_name);
@@ -489,23 +348,10 @@ Graph::getTransitiveDependencies(const std::string &qualified_name) {
 
 std::string Graph::getTargetBuildSubdir() const {
   std::string pk =
-      (m_options.profile == BuildProfile::Release) ? "release" : "debug";
+      (m_options.profile == BuildProfile::RELEASE) ? "release" : "debug";
   return m_root_manifest->output.configs.count(pk)
              ? m_root_manifest->output.configs.at(pk).subdir
              : pk;
-}
-
-bool Graph::evaluateConditionExpression(
-    const std::string &condition, const Target &target,
-    const std::shared_ptr<ProjectManifest> &manifest) {
-  if (condition.empty())
-    return true;
-  auto tokens = tokenizeCondition(condition);
-  if (tokens.empty())
-    return true;
-  size_t pos = 0;
-  bool result = parseExpr(tokens, pos, target, manifest, this);
-  return (pos == tokens.size()) ? result : false;
 }
 
 void Graph::matchGlobPattern(const std::string &pattern,
@@ -570,12 +416,14 @@ Graph::resolveTargetSources(const Target &target,
                             const std::shared_ptr<ProjectManifest> &manifest) {
   std::vector<std::string> res;
   std::string b = manifest->base_dir.empty() ? "." : manifest->base_dir;
-  auto ev = [&](const std::string &c) {
-    return evaluateConditionExpression(c, target, manifest);
+
+  auto ev = [&](const std::string &condition_str) -> bool {
+    return m_conditionEngine->evaluate(condition_str);
   };
+
   for (const auto &s : target.getActiveSources(ev)) {
     if (s.starts_with("@")) {
-      std::string gn = s.substr(1);
+      std::string_view gn = std::string_view(s).substr(1);
       for (const auto &fg : manifest->file_groups) {
         if (fg.name == gn) {
           for (const auto &p : fg.patterns)
@@ -583,17 +431,22 @@ Graph::resolveTargetSources(const Target &target,
           break;
         }
       }
-    } else if (s.find_first_of("*?{") != std::string::npos)
+    } else if (s.find_first_of("*?{") != std::string::npos) {
       matchGlobPattern(s, b, res);
-    else {
-      std::string c = s;
+    } else {
+      std::string_view c = s;
       if (c.starts_with("./"))
         c = c.substr(2);
-      fs::path p = fs::path(b) / c;
+
+      // Constructing fs::path directly from the base and our sliced string_view
+      // slice
+      fs::path p = fs::path(b) / std::string(c);
       if (fs::exists(p) && fs::is_regular_file(p))
         res.push_back(p.lexically_normal().string());
     }
   }
+
+  // Keep target lists unique and deterministically ordered
   std::sort(res.begin(), res.end());
   res.erase(std::unique(res.begin(), res.end()), res.end());
   return res;
@@ -634,8 +487,9 @@ Graph::computeBuildOrder(const std::vector<GraphEdge> &edges) {
 bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   if (build_order.empty())
     return true;
+  if (!m_compiler)
+    return false;
 
-  // --- INTERNAL STRUCTURES ---
   struct Record {
     std::string s, t, h;
   };
@@ -648,14 +502,15 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     std::vector<std::string> objs;
   };
   struct Task {
-    std::string s, o, c, f, w;
+    std::string s, o;
+    bool is_c;
+    std::string std_flag;
+    std::string wd;
     std::shared_ptr<const std::vector<std::string>> a;
-    bool m;
   };
 
   std::vector<std::string> compilation_entries;
   auto start_t = std::chrono::high_resolution_clock::now();
-  Toolchain tc = discoverToolchain();
   std::string wd = fs::absolute(fs::current_path()).string();
 
   std::string b_dir =
@@ -679,16 +534,18 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
   }
 
   auto get_out_path = [&](const QualifiedTarget *qt) {
-    std::string out =
-        (fs::path(b_dir) /
-         (qt->target.type == TargetType::StaticLibrary && !tc.is_msvc ? "lib"
-                                                                      : ""))
-            .string();
-    out += qt->target.name;
-    if (qt->target.type == TargetType::StaticLibrary)
-      out += (tc.is_msvc ? ".lib" : ".a");
-    else if (qt->target.type == TargetType::Executable)
-      out += (tc.is_msvc ? ".exe" : "");
+    fs::path out = fs::path(b_dir);
+    std::string name = qt->target.name;
+
+    if (qt->target.type == TargetType::StaticLibrary) {
+      if (m_compiler->getType() != CompilerType::MSVC) {
+        name = "lib" + name;
+      }
+      out /=
+          name + (m_compiler->getType() == CompilerType::MSVC ? ".lib" : ".a");
+    } else if (qt->target.type == TargetType::Executable) {
+      out /= name + (m_compiler->getType() == CompilerType::MSVC ? ".exe" : "");
+    }
     return fs::absolute(out).string();
   };
 
@@ -774,19 +631,27 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
           }
           auto &ctx = itm.first;
           auto &t = itm.second;
-          std::vector<std::string> args = {t.c, t.f};
-          for (const auto &a : *t.a)
-            args.push_back(a);
-          if (t.m) {
-            args.push_back("/c");
-            args.push_back(t.s);
-            args.push_back("/Fo" + t.o);
-          } else {
-            args.push_back("-c");
-            args.push_back(t.s);
+
+          std::vector<std::string> args = {
+              m_compiler->getCompilerBinary(t.is_c)};
+          args.push_back(m_compiler->compileOnlyFlag());
+          args.push_back(t.s);
+
+          // Handle the inner-quoted format safely by splitting tokens
+          std::string formattedOutput = m_compiler->formatOutput(t.o);
+          if (formattedOutput.starts_with("-o \"") &&
+              formattedOutput.ends_with("\"")) {
             args.push_back("-o");
             args.push_back(t.o);
+          } else {
+            args.push_back(formattedOutput);
           }
+
+          args.push_back(t.std_flag);
+
+          for (const auto &a : *t.a)
+            args.push_back(a);
+
           if (executeCommandFast(args) != 0) {
             ctx->f = true;
             failed = true;
@@ -821,50 +686,50 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       if (!target_needs_link[cr]) {
         lib_path_map[cr] = current_out;
         finished_t++;
-        for (const auto &d : dep_graph[cr])
+        for (const auto &d : dep_graph[cr]) {
           if (--in_degree[d] == 0)
             ready.push(d);
+        }
         continue;
       }
 
       if (workers.empty())
         spawn_workers();
-      auto b_args = std::make_shared<std::vector<std::string>>();
-      if (tc.is_msvc) {
-        b_args->push_back("/O2");
-        b_args->push_back("/EHsc");
-      } else {
-        b_args->push_back("-fPIC");
-        b_args->push_back("-O3");
-      }
 
-      auto ev = [&](const std::string &c) {
-        return evaluateConditionExpression(c, qt->target, qt->manifest);
+      auto b_args = std::make_shared<std::vector<std::string>>();
+      b_args->push_back(m_compiler->optimizationFlag(m_options.profile));
+
+      std::string pic = m_compiler->positionIndependentCodeFlag();
+      if (!pic.empty())
+        b_args->push_back(pic);
+
+      auto ev = [&](const std::string &condition_str) {
+        return m_conditionEngine->evaluate(condition_str);
       };
+
       for (const auto &f : qt->target.getActiveFlags(ev))
         b_args->push_back(f);
 
-      // --- BULLETPROOF INCLUDE RESOLUTION ---
       std::unordered_set<std::string> unique_includes;
-      auto add_inc_safe = [&](const std::string &target_qn,
-                              const std::string &raw_p,
+      auto add_inc_safe = [&](const std::string &, const std::string &raw_p,
                               const std::string &manifest_base) {
         if (raw_p.empty())
           return;
         fs::path p = raw_p;
         if (p.is_relative())
           p = fs::absolute(fs::path(manifest_base) / raw_p);
-        std::string final_path = p.lexically_normal().string();
-        std::string flag = (tc.is_msvc ? "/I" : "-I") + final_path;
+        unique_includes.insert(
+            m_compiler->formatInclude(p.lexically_normal().string()));
       };
 
       for (const auto &i : qt->target.include_dirs)
         add_inc_safe(cr, i, qt->manifest->base_dir);
       for (const auto &i : qt->manifest->project.include_dirs)
         add_inc_safe(cr, i, qt->manifest->base_dir);
-      if (qt->manifest->exports)
+      if (qt->manifest->exports) {
         for (const auto &i : qt->manifest->exports->include_dirs)
           add_inc_safe(cr, i, qt->manifest->base_dir);
+      }
 
       auto resolve_recursive_includes =
           [&](auto &self, std::shared_ptr<ProjectManifest> m) -> void {
@@ -873,10 +738,11 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
             add_inc_safe(cr, ".", dep.manifest->base_dir);
             for (const auto &i : dep.manifest->project.include_dirs)
               add_inc_safe(cr, i, dep.manifest->base_dir);
-            if (dep.manifest->exports)
+            if (dep.manifest->exports) {
               for (const auto &i : dep.manifest->exports->include_dirs)
                 add_inc_safe(cr, i, dep.manifest->base_dir);
-            self(self, dep.manifest); // Go deeper
+            }
+            self(self, dep.manifest);
           }
         }
       };
@@ -886,23 +752,27 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
 
       for (const auto &pr : qt->target.getActiveProperties(ev)) {
         if (pr.starts_with("@")) {
-          for (const auto &pg : qt->manifest->property_groups)
+          for (const auto &pg : qt->manifest->property_groups) {
             if (pg.name == pr.substr(1) &&
-                (!pg.condition || evaluateConditionExpression(
-                                      *pg.condition, qt->target, qt->manifest)))
+                (!pg.condition || m_conditionEngine->evaluate(*pg.condition))) {
               for (const auto &d : pg.defines)
-                b_args->push_back((tc.is_msvc ? "/D" : "-D") + d);
-        } else
-          b_args->push_back((tc.is_msvc ? "/D" : "-D") + pr);
+                b_args->push_back(m_compiler->formatDefine(d));
+            }
+          }
+        } else {
+          b_args->push_back(m_compiler->formatDefine(pr));
+        }
       }
 
       for (const auto &src : m_resolvedSourcesCache[cr]) {
         bool is_c = fs::path(src).extension() == ".c";
-        std::string cmd = (is_c ? tc.c_compiler : tc.cpp_compiler) +
-                          (tc.is_msvc ? " /std:c11" : " -std=c++23");
+        std::string std_v = is_c ? "11" : "23";
+        std::string cmd = m_compiler->getCompilerBinary(is_c) + " " +
+                          m_compiler->standardFlag(std_v, is_c);
         for (const auto &arg : *b_args)
           cmd += " " + arg;
-        cmd += (tc.is_msvc ? " /c \"" : " -c \"") + src + "\"";
+        cmd += " " + m_compiler->compileOnlyFlag() + " \"" + src + "\"";
+
         std::string entry = "  {\n    \"directory\": \"" +
                             escapeJsonString(wd) + "\",\n    \"command\": \"" +
                             escapeJsonString(cmd) + "\",\n    \"file\": \"" +
@@ -919,12 +789,14 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
       {
         std::lock_guard<std::mutex> qlk{q_mutex};
         for (size_t i = 0; i < m_resolvedSourcesCache[cr].size(); ++i) {
-          std::string s = m_resolvedSourcesCache[cr][i],
-                      o = (fs::path(obj_dir) / qt->target.name /
-                           (fs::path(s).filename().string() + "_" +
-                            std::to_string(std::hash<std::string>{}(s)) +
-                            (tc.is_msvc ? ".obj" : ".o")))
-                              .string();
+          std::string s = m_resolvedSourcesCache[cr][i];
+          std::string extension =
+              (m_compiler->getType() == CompilerType::MSVC) ? ".obj" : ".o";
+          std::string o =
+              (fs::path(obj_dir) / qt->target.name /
+               (fs::path(s).filename().string() + "_" +
+                std::to_string(std::hash<std::string>{}(s)) + extension))
+                  .string();
           ctx->objs[i] = o;
           if (m_options.force_rebuild || !state_cache.count(s) ||
               state_cache[s].first !=
@@ -933,23 +805,22 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
               !fs::exists(o)) {
             ctx->r++;
             ctx->l = true;
-            q.push({ctx,
-                    {s, o,
-                     fs::path(s).extension() == ".c" ? tc.c_compiler
-                                                     : tc.cpp_compiler,
-                     (fs::path(s).extension() == ".c"
-                          ? (tc.is_msvc ? "/std:c11" : "-std=c11")
-                          : (tc.is_msvc ? "/std:c++20" : "-std=c++23")),
-                     wd, b_args, tc.is_msvc}});
+
+            bool is_c = fs::path(s).extension() == ".c";
+            std::string std_flag =
+                m_compiler->standardFlag(is_c ? "11" : "23", is_c);
+
+            q.push({ctx, {s, o, is_c, std_flag, wd, b_args}});
           }
         }
       }
       if (ctx->r == 0) {
         lib_path_map[cr] = current_out;
         finished_t++;
-        for (const auto &d : dep_graph[cr])
+        for (const auto &d : dep_graph[cr]) {
           if (--in_degree[d] == 0)
             ready.push(d);
+        }
       } else {
         q_cv.notify_all();
         active.push_back(ctx);
@@ -969,32 +840,50 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         }
         std::string out_f = get_out_path(ctx->q);
         if (ctx->l || !fs::exists(out_f)) {
-          std::string lk =
-              (tc.is_msvc ? (tc.archiver + " /OUT:\"" + out_f + "\" ")
-                          : (tc.archiver + " rcs \"" + out_f + "\" "));
-          if (ctx->q->target.type != TargetType::StaticLibrary) {
-            lk = (tc.is_msvc ? "cl " : (tc.cpp_compiler + " "));
+          std::vector<std::string> lk_args;
+
+          if (ctx->q->target.type == TargetType::StaticLibrary) {
+            lk_args.push_back(m_compiler->getArchiverBinary());
+
+            // Unpack archive command clean tokens (e.g. "rcs out.a")
+            std::string archive_fmt = m_compiler->formatArchiveCommand(out_f);
+            if (archive_fmt.starts_with("rcs \"") &&
+                archive_fmt.ends_with("\"")) {
+              lk_args.push_back("rcs");
+              lk_args.push_back(out_f);
+            } else {
+              lk_args.push_back(archive_fmt);
+            }
+
             for (const auto &o : ctx->objs)
-              lk += " \"" + o + "\" ";
-            if (!tc.is_msvc) {
-              lk += " -o \"" + out_f + "\" ";
+              lk_args.push_back(o);
+          } else {
+            lk_args.push_back(m_compiler->getCompilerBinary(false));
+            for (const auto &o : ctx->objs)
+              lk_args.push_back(o);
+
+            // Clean split token placement for linking stage output flag
+            lk_args.push_back("-o");
+            lk_args.push_back(out_f);
+
+            if (m_compiler->getType() != CompilerType::MSVC) {
               std::unordered_set<std::string> linked_artifacts;
-              for (const auto &[qn, path] : lib_path_map)
+              for (const auto &[qn, path] : lib_path_map) {
                 if (path.find(".a") != std::string::npos)
                   linked_artifacts.insert(path);
+              }
               for (const auto &p : linked_artifacts) {
                 std::cout << " ℹ [DEBUG] " << ctx->q->qualifiedName
                           << " <- linking: " << p << std::endl;
-                lk += " \"" + p + "\" ";
+                lk_args.push_back(p);
               }
               for (const auto &s : ctx->q->target.system_libs)
-                lk += " -l" + s;
+                lk_args.push_back("-l" + s);
             }
-          } else {
-            for (const auto &o : ctx->objs)
-              lk += " \"" + o + "\" ";
           }
-          if (std::system(lk.c_str()) != 0) {
+
+          // Safe low-level fork execution handling
+          if (executeCommandFast(lk_args) != 0) {
             failed = true;
             break;
           }
@@ -1008,12 +897,14 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
         }
         executeHooks(ctx->q->manifest, HookTrigger::PostTargetBuild,
                      ctx->q->target.name);
-        for (const auto &d : dep_graph[ctx->q->qualifiedName])
+        for (const auto &d : dep_graph[ctx->q->qualifiedName]) {
           if (--in_degree[d] == 0)
             ready.push(d);
+        }
         it = active.erase(it);
-      } else
+      } else {
         ++it;
+      }
     }
   }
   sl.unlock();
@@ -1022,24 +913,27 @@ bool Graph::BuildAllTree(const std::vector<std::string> &build_order) {
     stop = true;
   }
   q_cv.notify_all();
-  for (auto &w : workers)
+  for (auto &w : workers) {
     if (w.joinable())
       w.join();
+  }
   if (failed)
     return false;
 
   std::ofstream oc(c_path);
-  if (oc.is_open())
+  if (oc.is_open()) {
     for (auto const &[p, d] : state_cache)
       oc << p << " " << d.first << " " << d.second << "\n";
+  }
   executeHooks(m_root_manifest, HookTrigger::PostBuild, "");
 
   std::ofstream ccmds("compile_commands.json");
   if (ccmds.is_open()) {
     ccmds << "[\n";
-    for (size_t i = 0; i < compilation_entries.size(); ++i)
+    for (size_t i = 0; i < compilation_entries.size(); ++i) {
       ccmds << compilation_entries[i]
             << (i == compilation_entries.size() - 1 ? "" : ",\n");
+    }
     ccmds << "\n]";
   }
   if (m_options.verbosity != Verbosity::Quiet) {

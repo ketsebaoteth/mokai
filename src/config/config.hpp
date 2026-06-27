@@ -9,6 +9,8 @@
 
 namespace mokai {
 
+struct GlobalOptions;
+
 struct FuzzyFindResult {
   bool found;
   std::string best_match;
@@ -16,7 +18,7 @@ struct FuzzyFindResult {
 
 class Config {
 public:
-  Config(std::string workingDir);
+  Config(std::string workingDir, GlobalOptions &options);
 
   // Returns a shared pointer to the parsed, platform-normalized manifest
   // configuration
@@ -37,7 +39,7 @@ private:
   // parsing
   std::expected<void, std::string> loadConfig(const std::string &path);
   std::expected<void, std::string> parseConfig();
-  std::expected<void, std::string> extractProjectData();
+  std::expected<void, std::string> extractProjectData(GlobalOptions &ops);
 
   // fetch from git
   bool isGitDep(std::string &str);
