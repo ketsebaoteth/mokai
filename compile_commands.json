@@ -1,67 +1,67 @@
 [
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/cli/cli.cpp\"",
-    "file": "/home/k/Documents/mokai/src/cli/cli.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/cli/cli.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/cli/cli.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/config/config.cpp\"",
-    "file": "/home/k/Documents/mokai/src/config/config.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/config/config.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/config/config.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/core/os.cpp\"",
-    "file": "/home/k/Documents/mokai/src/core/os.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/core/os.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/core/os.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/build_pipeline.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/build_pipeline.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/build_pipeline.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/build_pipeline.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/compiler/tool_chain_finder.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/compiler/tool_chain_finder.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/compiler/tool_chain_finder.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/compiler/tool_chain_finder.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/condition/ConditionEval.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/condition/ConditionEval.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/condition/ConditionEval.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/condition/ConditionEval.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graph.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/graph.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/graph.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/graph.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/serialize.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/serialize.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/serialize.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/serialize.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/source_cache.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/source_cache.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/source_cache.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/source_cache.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/types.cpp\"",
-    "file": "/home/k/Documents/mokai/src/graph/types.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/graph/types.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/graph/types.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/templates/template.cpp\"",
-    "file": "/home/k/Documents/mokai/src/templates/template.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/templates/template.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/templates/template.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -fno-exceptions -fno-rtti -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/entry.cpp\"",
-    "file": "/home/k/Documents/mokai/src/entry.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -fno-exceptions -fno-rtti -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/entry.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/entry.cpp"
   },
   {
-    "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/tests/conditions.cpp\"",
-    "file": "/home/k/Documents/mokai/src/tests/conditions.cpp"
+    "directory": "/home/xdk/Projects/mokai",
+    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/tests/conditions.cpp\"",
+    "file": "/home/xdk/Projects/mokai/src/tests/conditions.cpp"
   }
 ]
