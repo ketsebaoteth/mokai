@@ -691,6 +691,10 @@ Graph::resolveTargetSources(const Target &target,
       fs::path p = fs::path(b) / std::string(c);
       if (fs::exists(p) && fs::is_regular_file(p)) {
         res.push_back(p.lexically_normal().string());
+      } else {
+        Log::Warn(std::format(
+            "Source file not found, skipping: '{}'",
+            p.lexically_normal().string()));
       }
     }
   }

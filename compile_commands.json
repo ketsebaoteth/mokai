@@ -53,15 +53,5 @@
     "directory": "/home/xdk/Projects/mokai",
     "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/templates/template.cpp\"",
     "file": "/home/xdk/Projects/mokai/src/templates/template.cpp"
-  },
-  {
-    "directory": "/home/xdk/Projects/mokai",
-    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -fno-exceptions -fno-rtti -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/entry.cpp\"",
-    "file": "/home/xdk/Projects/mokai/src/entry.cpp"
-  },
-  {
-    "directory": "/home/xdk/Projects/mokai",
-    "command": "/usr/sbin/clang++-21 -std=c++23 -g -fPIC -I/home/xdk/Projects/mokai/tests -I/home/xdk/Projects/mokai/src -c \"/home/xdk/Projects/mokai/src/tests/conditions.cpp\"",
-    "file": "/home/xdk/Projects/mokai/src/tests/conditions.cpp"
   }
 ]
