@@ -424,33 +424,6 @@ Config::extractProjectData(GlobalOptions &ops) {
           it->tgt.system_libs.push_back(field.value);
         else if (field.key == "depends_on")
           it->tgt.depends_on.push_back(field.value);
-      } else {
-        std::string_view attr = sub.substr(dot_pos + 1);
-        if (attr == "sources_if") {
-          if (field.key == "condition") {
-            it->tgt.sources_if.push_back(ConditionalSources{field.value, {}});
-          } else if (field.key == "patterns" && !it->tgt.sources_if.empty()) {
-            it->tgt.sources_if.back().patterns.push_back(field.value);
-          }
-        } else if (attr == "flags_if") {
-          if (field.key == "condition") {
-            it->tgt.flags_if.push_back(ConditionalFlags{field.value, {}});
-          } else if (field.key == "flags" && !it->tgt.flags_if.empty()) {
-            it->tgt.flags_if.back().flags.push_back(field.value);
-          }
-        } else if (attr == "properties_if") {
-          if (field.key == "condition") {
-            it->tgt.properties_if.push_back(ConditionalProperties{field.value, {}});
-          } else if (field.key == "defines" && !it->tgt.properties_if.empty()) {
-            it->tgt.properties_if.back().defines.push_back(field.value);
-          }
-        } else if (attr == "system_libs_if") {
-          if (field.key == "condition") {
-            it->tgt.system_libs_if.push_back(ConditionalSystemLibs{field.value, {}});
-          } else if (field.key == "libs" && !it->tgt.system_libs_if.empty()) {
-            it->tgt.system_libs_if.back().libs.push_back(field.value);
-          }
-        }
       }
     }
     // 7. [exports] dynamic library layout data

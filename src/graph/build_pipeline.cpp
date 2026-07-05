@@ -595,17 +595,15 @@ private:
       }
 
       if (ctx->remaining_tasks == 0) {
-        // All object files were up-to-date, but the target may still need
-        // linking (e.g. output was deleted while obj cache remains).
         if (!ctx->object_files.empty() && !fs::exists(current_out)) {
           if (!linkContextTarget(ctx, current_out)) {
             m_failed = true;
             break;
           }
         } else if (ctx->object_files.empty()) {
-          Log::Warn(std::format(
-              "Target '{}' has no resolved source files; skipping.",
-              qt->target.name));
+          Log::Warn(
+              std::format("Target '{}' has no resolved source files; skipping.",
+                          qt->target.name));
         }
         m_lib_path_map[cr] = current_out;
         m_finished_targets++;
@@ -653,11 +651,12 @@ private:
         }
         for (const auto &p : linked_artifacts)
           lk_args.push_back(p);
-          
+
         auto evaluator = [this](const std::string &cond) {
           return m_graph.m_conditionEngine->evaluate(cond);
         };
-        for (const auto &s : ctx->target_ref->target.getActiveSystemLibs(evaluator))
+        for (const auto &s :
+             ctx->target_ref->target.getActiveSystemLibs(evaluator))
           lk_args.push_back("-l" + s);
       }
     }
