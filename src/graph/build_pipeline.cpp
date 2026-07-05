@@ -603,7 +603,7 @@ private:
         } else if (ctx->object_files.empty()) {
           Log::Warn(std::format(
               "Target '{}' has no resolved source files; skipping.",
-	      qt->target.name));
+	     qt->target.name));
         }
         m_lib_path_map[cr] = current_out;
         m_finished_targets++;
@@ -651,7 +651,7 @@ private:
         }
         for (const auto &p : linked_artifacts)
           lk_args.push_back(p);
-
+	
         auto evaluator = [this](const std::string &cond) {
           return m_graph.m_conditionEngine->evaluate(cond);
         };
