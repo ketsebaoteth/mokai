@@ -313,6 +313,8 @@ ToolchainFinder::discover(const std::string &user_pref) {
     available_toolchains++;
   }
 
+  std::string choice;
+
   if (available_toolchains > 1) {
     std::string msg = "Multiple toolchains found on PATH (";
     if (!gcc_cpp.empty()) {
@@ -328,25 +330,28 @@ ToolchainFinder::discover(const std::string &user_pref) {
       msg.resize(msg.size() - 2);
     }
 
-    std::string choice =
-        !gcc_cpp.empty() ? "g++" : (!clang_cpp.empty() ? "clang++" : "cl");
+    choice = !gcc_cpp.empty()     ? "g++"
+             : !clang_cpp.empty() ? "clang++"
+             : !cl_bin.empty()    ? "cl"
+                                  : "";
+
     msg += "). Defaulting to " + choice +
            ". Set [project] default_compiler to override.";
     Log::Warn(msg);
   }
 
-  if (!clang_cpp.empty()) {
+  if (choice == "clang++") {
     std::string final_ar = llvm_ar.empty() ? ar_bin : llvm_ar;
     return std::make_unique<ClangCompiler>(
         std::move(clang_c), std::move(clang_cpp), std::move(final_ar));
   }
 
-  if (!gcc_cpp.empty()) {
+  if (choice == "g++") {
     return std::make_unique<GccCompiler>(std::move(gcc_c), std::move(gcc_cpp),
                                          std::move(ar_bin));
   }
 
-  if (!cl_bin.empty()) {
+  if (choice == "cl") {
     if (lib_ar.empty()) {
       lib_ar = "lib";
     }
