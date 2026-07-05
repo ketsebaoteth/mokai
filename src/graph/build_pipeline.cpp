@@ -603,7 +603,7 @@ private:
         } else if (ctx->object_files.empty()) {
           Log::Warn(std::format(
               "Target '{}' has no resolved source files; skipping.",
-	     qt->target.name));
+	       qt->target.name));
         }
         m_lib_path_map[cr] = current_out;
         m_finished_targets++;
