@@ -279,10 +279,14 @@ std::expected<std::monostate, CliError> Cli::ParseCliArgs(int argc,
       m_options.verbosity = Verbosity::Quiet;
     else if (arg == "--release")
       m_options.profile = BuildProfile::RELEASE;
-    else if (arg == "--debug")
-      m_options.profile = BuildProfile::DEBUG;
-    else if (arg == "--minsizerel")
-      m_options.profile = BuildProfile::MINSIZEREL;
+
+    // TODO: Tokenize `int` after '--debug' for scalability
+    else if (arg == "--debug=1")
+      m_options.profile = BuildProfile::DEBUG_Lv1;
+    else if (arg == "--debug=2" || arg == "--debug")
+      m_options.profile = BuildProfile::DEBUG_Lv2;
+    else if (arg == "--debug=3")
+      m_options.profile = BuildProfile::DEBUG_Lv3;
     else if (arg == "--no-cache" || arg == "--clean")
       m_options.force_rebuild = true;
     else if (arg == "-j" || arg == "--jobs") {

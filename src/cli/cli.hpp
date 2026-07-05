@@ -18,14 +18,14 @@ namespace mokai {
 
 enum class Verbosity { Quiet, Default, Verbose };
 enum class ColorMode { Auto, Always, Never };
-enum class BuildProfile { DEBUG, RELEASE, MINSIZEREL };
 
 struct GlobalOptions {
   std::filesystem::path root_dir = std::filesystem::current_path();
   Verbosity verbosity = Verbosity::Default;
   ColorMode color = ColorMode::Auto;
 
-  BuildProfile profile = BuildProfile::DEBUG;
+  BuildProfile profile = BuildProfile::DEBUG_Lv2;
+  OptimizationLevel level = OptimizationLevel::None;
   int job_count = 0;
   std::string target_filter = "";
   bool force_rebuild = false;

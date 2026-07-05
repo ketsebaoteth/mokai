@@ -1,11 +1,13 @@
 #pragma once
-#include "cli/cli.hpp"
+
 #include "icompiler.hpp"
+#include <filesystem>
 #include <format>
 #include <string_view>
 
 namespace fs = std::filesystem;
 namespace mokai {
+
 class ClangCompiler : public ICompiler {
 public:
   ClangCompiler(std::string c_path, std::string cpp_path, std::string ar_path)
@@ -42,16 +44,34 @@ public:
 
   std::string getObjExtension() const override { return ".o"; }
 
-  std::string optimizationFlag(BuildProfile build_type) const override {
+  std::string buildFlag(BuildProfile build_type) const override {
     switch (build_type) {
-    case BuildProfile::DEBUG:
-      return "-g";
-    case BuildProfile::RELEASE:
-      return "-O3";
-    case BuildProfile::MINSIZEREL:
-      return "-Os";
+    case BuildProfile::DEBUG_Lv1:
+      return "-g1";
+    case BuildProfile::DEBUG_Lv2:
+      return "-g2";
+    case BuildProfile::DEBUG_Lv3:
+      return "-g3";
+    default:
+      return "-DNDEBUG";
     }
-    return "-O2"; // fallback
+  }
+
+  std::string optimizationFlag(OptimizationLevel lv) const override {
+    switch (lv) {
+    case OptimizationLevel::Perf_Slight:
+      return "-O1";
+    case OptimizationLevel::Perf_Moderate:
+      return "-O3";
+    case OptimizationLevel::Perf_Max:
+      return "-Ofast";
+    case OptimizationLevel::Space_Moderate:
+      return "-Os";
+    case OptimizationLevel::Space_Max:
+      return "-Oz";
+    default:
+      return "";
+    }
   }
 
   std::string compileOnlyFlag() const override { return "-c"; }
@@ -71,4 +91,5 @@ private:
   std::string m_cpp_path;
   std::string m_ar_path;
 };
+
 } // namespace mokai

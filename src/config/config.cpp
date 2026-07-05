@@ -420,6 +420,8 @@ Config::extractProjectData(GlobalOptions &ops) {
           it->tgt.properties.push_back(field.value);
         else if (field.key == "flags")
           it->tgt.flags.push_back(field.value);
+        else if (field.key == "defines")
+          it->tgt.defines.push_back(field.value);
         else if (field.key == "system_libs")
           it->tgt.system_libs.push_back(field.value);
         else if (field.key == "depends_on")

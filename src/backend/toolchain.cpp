@@ -20,8 +20,17 @@ public:
     cmd << GetCompilerExecutable() << " -c " << src.string() << " -o "
         << obj.string();
 
-    if (options.opt_level == OptimizationLevel::Optimize) {
+    // INFO: -flto for Link Time Optimization
+    if (options.opt_level == OptimizationLevel::Perf_Slight) {
+      cmd << " -O1 -DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Perf_Moderate) {
       cmd << " -O3 -DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Perf_Max) {
+      cmd << " -Ofast -flto -DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Space_Moderate) {
+      cmd << " -Os -DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Space_Max) {
+      cmd << " -Oz -flto -DNDEBUG";
     } else {
       cmd << " -O0";
     }
@@ -36,6 +45,10 @@ public:
 
     for (const auto &dir : options.include_dirs) {
       cmd << " -I" << dir.string();
+    }
+
+    for (const auto &dir : options.sys_include_dirs) {
+      cmd << " -i" << dir.string();
     }
 
     for (const auto &flag : options.custom_flags) {
@@ -101,8 +114,14 @@ public:
     // object path
     cmd << "cl.exe /nologo /c " << src.string() << " /Fo" << obj.string();
 
-    if (options.opt_level == OptimizationLevel::Optimize) {
+    if (options.opt_level == OptimizationLevel::Perf_Moderate) {
       cmd << " /O2 /DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Perf_Max) {
+      cmd << " /fp:fast /DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Space_Moderate) {
+      cmd << " /Os /DNDEBUG";
+    } else if (options.opt_level == OptimizationLevel::Space_Max) {
+      cmd << " /O1 /DNDEBUG";
     } else {
       cmd << " /Od";
     }
@@ -113,6 +132,10 @@ public:
 
     for (const auto &dir : options.include_dirs) {
       cmd << " /I" << dir.string();
+    }
+
+    for (const auto &dir : options.sys_include_dirs) {
+      cmd << " /i" << dir.string();
     }
 
     for (const auto &flag : options.custom_flags) {

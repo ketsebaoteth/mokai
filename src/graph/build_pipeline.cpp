@@ -1,6 +1,3 @@
-#include "graph.hpp"
-#include "graph/compiler/icompiler.hpp"
-#include "log/log.h"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -16,6 +13,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include "cli/cli.hpp"
+#include "graph.hpp"
+#include "graph/compiler/icompiler.hpp"
+#include "link_pipeline.hxx"
+#include "log/log.h"
 
 namespace fs = std::filesystem;
 
@@ -33,15 +36,6 @@ private:
   std::vector<std::string> include_dirs;
 
 public:
-  struct Task {
-    std::string source;
-    std::string output;
-    bool is_c;
-    std::string std_flag;
-    std::string working_dir;
-    std::shared_ptr<const std::vector<std::string>> build_args;
-  };
-
   struct TargetContext {
     const QualifiedTarget *target_ref;
     std::atomic<size_t> remaining_tasks{0};
@@ -281,27 +275,10 @@ private:
             m_cv.notify_one();
             continue;
           }
-          std::vector<std::string> args = {
-              m_graph.m_compiler->getCompilerBinary(task.is_c)};
-          args.push_back(m_graph.m_compiler->compileOnlyFlag());
-          args.push_back(task.source);
 
-          std::string formatted = m_graph.m_compiler->formatOutput(task.output);
-          if (formatted.starts_with("-o \"") && formatted.ends_with("\"")) {
-            args.push_back("-o");
-            args.push_back(task.output);
-          } else {
-            args.push_back(formatted);
-          }
-          for (const auto &f :
-               m_graph.m_compiler->dependencyFlags(task.output)) {
-            args.push_back(f);
-          }
+          std::vector<std::string> args =
+              m_graph.m_compiler->OrchestrateCompileArgs(task);
 
-          args.push_back(task.std_flag);
-          for (const auto &arg : *task.build_args) {
-            args.push_back(arg);
-          }
           if (m_graph.m_compiler->getType() == CompilerType::MSVC) {
             if (m_graph.executeCommandFast(
                     args,
@@ -361,8 +338,7 @@ private:
   std::shared_ptr<std::vector<std::string>>
   collectBuildFlags(const QualifiedTarget *qt, const std::string &qn) {
     auto b_args = std::make_shared<std::vector<std::string>>();
-    b_args->push_back(
-        m_graph.m_compiler->optimizationFlag(m_graph.m_options.profile));
+    b_args->push_back(m_graph.m_compiler->buildFlag(m_graph.m_options.profile));
 
     std::string pic = m_graph.m_compiler->positionIndependentCodeFlag();
     if (!pic.empty())
@@ -375,6 +351,9 @@ private:
     for (const auto &flag : qt->target.getActiveFlags(evaluator)) {
       b_args->push_back(flag);
     }
+
+    for (const auto &define : qt->target.defines)
+      b_args->push_back("-D" + define);
 
     std::unordered_set<std::string> unique_includes;
     auto add_inc = [this, &unique_includes](const std::string &raw_p,
@@ -601,9 +580,9 @@ private:
             break;
           }
         } else if (ctx->object_files.empty()) {
-          Log::Warn(std::format(
-              "Target '{}' has no resolved source files; skipping.",
-	       qt->target.name));
+          Log::Warn(
+              std::format("Target '{}' has no resolved source files; skipping.",
+                          qt->target.name));
         }
         m_lib_path_map[cr] = current_out;
         m_finished_targets++;
@@ -624,40 +603,96 @@ private:
   bool linkContextTarget(std::shared_ptr<TargetContext> ctx,
                          const std::string &out_file) {
     std::vector<std::string> lk_args;
+
     if (ctx->target_ref->target.type == TargetType::StaticLibrary) {
       lk_args.push_back(m_graph.m_compiler->getArchiverBinary());
+
       std::string archive_fmt =
           m_graph.m_compiler->formatArchiveCommand(out_file);
+
       if (archive_fmt.starts_with("rcs \"") && archive_fmt.ends_with("\"")) {
         lk_args.push_back("rcs");
         lk_args.push_back(out_file);
       } else {
         lk_args.push_back(archive_fmt);
       }
+
       for (const auto &o : ctx->object_files)
         lk_args.push_back(o);
     } else {
+
       lk_args.push_back(m_graph.m_compiler->getCompilerBinary(false));
+
+      std::vector<std::string> link_candidates;
+
       for (const auto &o : ctx->object_files)
-        lk_args.push_back(o);
-      lk_args.push_back("-o");
-      lk_args.push_back(out_file);
+        link_candidates.push_back(o);
 
       if (m_graph.m_compiler->getType() != CompilerType::MSVC) {
-        std::unordered_set<std::string> linked_artifacts;
-        for (const auto &[qn, path] : m_lib_path_map) {
-          if (path.find(".a") != std::string::npos)
-            linked_artifacts.insert(path);
-        }
-        for (const auto &p : linked_artifacts)
-          lk_args.push_back(p);
-	
+
+        std::unordered_set<std::string> visited;
+
+        std::function<void(const QualifiedTarget *)> collectLibraries =
+            [&](const QualifiedTarget *qt) {
+              if (!qt)
+                return;
+
+              if (!visited.insert(qt->qualifiedName).second)
+                return;
+
+              for (const auto &dep : qt->target.depends_on) {
+
+                auto resolved = m_graph.resolveDependsOnEntry(dep, *qt);
+
+                for (const auto &name : resolved) {
+
+                  const QualifiedTarget *depTarget =
+                      m_graph.FindByQualifiedName(name);
+
+                  if (!depTarget)
+                    continue;
+
+                  collectLibraries(depTarget);
+
+                  auto it = m_lib_path_map.find(name);
+
+                  if (it == m_lib_path_map.end())
+                    continue;
+
+                  if (it->second.ends_with(".a") ||
+                      it->second.ends_with(".lib")) {
+                    link_candidates.push_back(it->second);
+                  }
+                }
+              }
+            };
+
+        collectLibraries(ctx->target_ref);
+
+        LinkGraphResolver resolver;
+
+        auto ordered = resolver.resolveLinkOrder(link_candidates);
+
+        for (const auto &f : ordered)
+          lk_args.push_back(f);
+
         auto evaluator = [this](const std::string &cond) {
           return m_graph.m_conditionEngine->evaluate(cond);
         };
-        for (const auto &s : ctx->target_ref->target.getActiveSystemLibs(evaluator))
-          lk_args.push_back("-l" + s);
+
+        for (const auto &lib :
+             ctx->target_ref->target.getActiveSystemLibs(evaluator)) {
+          lk_args.push_back("-l" + lib);
+        }
+
+      } else {
+
+        for (const auto &o : ctx->object_files)
+          lk_args.push_back(o);
       }
+
+      lk_args.push_back("-o");
+      lk_args.push_back(out_file);
     }
 
     Log::Info(
