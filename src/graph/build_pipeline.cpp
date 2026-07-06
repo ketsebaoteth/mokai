@@ -17,6 +17,7 @@
 #include "cli/cli.hpp"
 #include "graph.hpp"
 #include "graph/compiler/icompiler.hpp"
+#include "graph/types.hpp"
 #include "link_pipeline.hxx"
 #include "log/log.h"
 
@@ -169,6 +170,9 @@ private:
   }
 
   std::string getOutputPath(const QualifiedTarget *qt) {
+    if (qt->target.type == TargetType::InterfaceLibrary)
+      return "";
+
     fs::path out(m_build_dir);
     std::string name = qt->target.name;
     if (qt->target.type == TargetType::StaticLibrary) {
@@ -192,6 +196,11 @@ private:
       const auto *qt = m_graph.FindByQualifiedName(qn);
       if (!qt)
         continue;
+
+      if (qt->target.type == TargetType::InterfaceLibrary) {
+        m_target_needs_link[qn] = false;
+        continue;
+      }
 
       std::string out_file = getOutputPath(qt);
       bool dirty = !fs::exists(out_file) || m_graph.m_options.force_rebuild;
@@ -506,6 +515,18 @@ private:
       if (!qt)
         continue;
 
+      if (qt->target.type == TargetType::InterfaceLibrary) {
+        m_lib_path_map[cr] = "";
+        m_finished_targets++;
+
+        for (const auto &d : m_dep_graph[cr]) {
+          if (--m_in_degree[d] == 0)
+            m_ready_queue.push(d);
+        }
+
+        continue;
+      }
+
       std::string current_out = getOutputPath(qt);
       if (!m_target_needs_link[cr]) {
         m_lib_path_map[cr] = current_out;
@@ -623,14 +644,17 @@ private:
 
       lk_args.push_back(m_graph.m_compiler->getCompilerBinary(false));
 
-      std::vector<std::string> link_candidates;
-
-      for (const auto &o : ctx->object_files)
-        link_candidates.push_back(o);
+      // CRITICAL FIX: Keep object files separate from static library archives.
+      // Raw object files always go first on the command line!
+      for (const auto &o : ctx->object_files) {
+        lk_args.push_back(o);
+      }
 
       if (m_graph.m_compiler->getType() != CompilerType::MSVC) {
 
         std::unordered_set<std::string> visited;
+        std::vector<std::string>
+            library_candidates; // ONLY contains .a / .lib files
 
         std::function<void(const QualifiedTarget *)> collectLibraries =
             [&](const QualifiedTarget *qt) {
@@ -661,7 +685,7 @@ private:
 
                   if (it->second.ends_with(".a") ||
                       it->second.ends_with(".lib")) {
-                    link_candidates.push_back(it->second);
+                    library_candidates.push_back(it->second);
                   }
                 }
               }
@@ -669,11 +693,11 @@ private:
 
         collectLibraries(ctx->target_ref);
 
+        // Resolve the topological link order purely for the static archives
         LinkGraphResolver resolver;
+        auto ordered_libs = resolver.resolveLinkOrder(library_candidates);
 
-        auto ordered = resolver.resolveLinkOrder(link_candidates);
-
-        for (const auto &f : ordered)
+        for (const auto &f : ordered_libs)
           lk_args.push_back(f);
 
         auto evaluator = [this](const std::string &cond) {
@@ -686,9 +710,9 @@ private:
         }
 
       } else {
-
-        for (const auto &o : ctx->object_files)
-          lk_args.push_back(o);
+        // For MSVC or fallbacks where we just append objects if not handled
+        // above (Though you'll want to add the lib handling for MSVC similarly
+        // later)
       }
 
       lk_args.push_back("-o");

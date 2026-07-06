@@ -412,6 +412,8 @@ Config::extractProjectData(GlobalOptions &ops) {
             it->tgt.type = TargetType::StaticLibrary;
           else if (field.value == "shared_library")
             it->tgt.type = TargetType::SharedLibrary;
+          else if (field.value == "interface")
+            it->tgt.type = TargetType::InterfaceLibrary;
         } else if (field.key == "sources")
           it->tgt.sources.push_back(field.value);
         else if (field.key == "include_dirs")

@@ -16,6 +16,7 @@ enum class TargetType {
   Executable,
   StaticLibrary,
   SharedLibrary,
+  InterfaceLibrary,
   Unknown,
 };
 
