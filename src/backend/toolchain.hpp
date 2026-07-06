@@ -8,8 +8,12 @@
 namespace mokai {
 
 enum class OptimizationLevel {
-  None,     // -O0 or /Od
-  Optimize, // -O3 or /O2
+  None,
+  Perf_Slight,    // -O1
+  Perf_Moderate,  // -O3    -> /O2
+  Perf_Max,       // -Ofast -> /fp:fast
+  Space_Moderate, // -Os    -> /Os
+  Space_Max,      // -Oz    -> /O1
 };
 
 struct CompilerOptions {
@@ -19,6 +23,8 @@ struct CompilerOptions {
       true; // Necessary for Linux shared libs, ignored by MSVC
   std::vector<std::string> custom_flags;
   std::vector<std::filesystem::path> include_dirs;
+  // INFO: Avoids uneccessary warnings from system includes (cmake uses it)
+  std::vector<std::filesystem::path> sys_include_dirs;
 };
 
 class IToolchainBackend {

@@ -412,6 +412,8 @@ Config::extractProjectData(GlobalOptions &ops) {
             it->tgt.type = TargetType::StaticLibrary;
           else if (field.value == "shared_library")
             it->tgt.type = TargetType::SharedLibrary;
+          else if (field.value == "interface_library")
+            it->tgt.type = TargetType::InterfaceLibrary;
         } else if (field.key == "sources")
           it->tgt.sources.push_back(field.value);
         else if (field.key == "include_dirs")
@@ -420,6 +422,8 @@ Config::extractProjectData(GlobalOptions &ops) {
           it->tgt.properties.push_back(field.value);
         else if (field.key == "flags")
           it->tgt.flags.push_back(field.value);
+        else if (field.key == "defines")
+          it->tgt.defines.push_back(field.value);
         else if (field.key == "system_libs")
           it->tgt.system_libs.push_back(field.value);
         else if (field.key == "depends_on")

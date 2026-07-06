@@ -50,7 +50,13 @@ std::string ToolchainFinder::findUnixBinary(const std::string &name) const {
   std::string path_str(path_env);
   std::stringstream ss(path_str);
   std::string dir;
-  std::vector<std::string> candidates;
+
+  struct Candidate {
+    std::string path;
+    int version;
+  };
+
+  std::vector<Candidate> candidates;
 
   while (std::getline(ss, dir, ':')) {
     if (dir.empty()) {
@@ -65,7 +71,7 @@ std::string ToolchainFinder::findUnixBinary(const std::string &name) const {
     fs::path direct_match = dir_path / name;
     if (fs::exists(direct_match) && !fs::is_directory(direct_match)) {
       if (::access(direct_match.c_str(), X_OK) == 0) {
-        candidates.push_back(fs::absolute(direct_match).string());
+        candidates.push_back({fs::absolute(direct_match).string(), -1});
       }
     }
 
@@ -76,9 +82,18 @@ std::string ToolchainFinder::findUnixBinary(const std::string &name) const {
         }
 
         std::string filename = entry.path().filename().string();
-        if (filename.rfind(name + "-", 0) == 0) {
-          if (::access(entry.path().c_str(), X_OK) == 0) {
-            candidates.push_back(fs::absolute(entry.path()).string());
+        std::string prefix = name + "-";
+
+        if (filename.rfind(prefix, 0) == 0) {
+          std::string suffix = filename.substr(prefix.length());
+
+          if (!suffix.empty() &&
+              std::all_of(suffix.begin(), suffix.end(),
+                          [](unsigned char c) { return std::isdigit(c); })) {
+            if (::access(entry.path().c_str(), X_OK) == 0) {
+              candidates.push_back(
+                  {fs::absolute(entry.path()).string(), std::stoi(suffix)});
+            }
           }
         }
       }
@@ -91,10 +106,13 @@ std::string ToolchainFinder::findUnixBinary(const std::string &name) const {
     return "";
   }
 
+  // 3. Sort by version descending (highest numeric version wins)
   std::sort(candidates.begin(), candidates.end(),
-            [](const std::string &a, const std::string &b) { return a > b; });
+            [](const Candidate &a, const Candidate &b) {
+              return a.version > b.version;
+            });
 
-  return candidates.front();
+  return candidates.front().path;
 #endif
   return "";
 }
@@ -313,6 +331,8 @@ ToolchainFinder::discover(const std::string &user_pref) {
     available_toolchains++;
   }
 
+  std::string choice;
+
   if (available_toolchains > 1) {
     std::string msg = "Multiple toolchains found on PATH (";
     if (!gcc_cpp.empty()) {
@@ -328,25 +348,28 @@ ToolchainFinder::discover(const std::string &user_pref) {
       msg.resize(msg.size() - 2);
     }
 
-    std::string choice =
-        !gcc_cpp.empty() ? "g++" : (!clang_cpp.empty() ? "clang++" : "cl");
+    choice = !gcc_cpp.empty()     ? "g++"
+             : !clang_cpp.empty() ? "clang++"
+             : !cl_bin.empty()    ? "cl"
+                                  : "";
+
     msg += "). Defaulting to " + choice +
            ". Set [project] default_compiler to override.";
     Log::Warn(msg);
   }
 
-  if (!clang_cpp.empty()) {
+  if (choice == "clang++") {
     std::string final_ar = llvm_ar.empty() ? ar_bin : llvm_ar;
     return std::make_unique<ClangCompiler>(
         std::move(clang_c), std::move(clang_cpp), std::move(final_ar));
   }
 
-  if (!gcc_cpp.empty()) {
+  if (choice == "g++") {
     return std::make_unique<GccCompiler>(std::move(gcc_c), std::move(gcc_cpp),
                                          std::move(ar_bin));
   }
 
-  if (!cl_bin.empty()) {
+  if (choice == "cl") {
     if (lib_ar.empty()) {
       lib_ar = "lib";
     }

@@ -42,4 +42,11 @@ std::vector<std::string> Target::getActiveProperties(
       [](const ConditionalProperties &block) { return block.defines; });
 }
 
+std::vector<std::string> Target::getActiveSystemLibs(
+    const std::function<bool(const std::string &)> &eval_fn) const {
+  return getActiveConditionalItems(
+      system_libs, system_libs_if, eval_fn,
+      [](const ConditionalSystemLibs &block) { return block.libs; });
+}
+
 } // namespace mokai

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "cli/cli.hpp"
 #include "icompiler.hpp"
 #include <format>
 #include <utility>
@@ -42,16 +41,30 @@ public:
 
   std::string getObjExtension() const override { return ".obj"; }
 
-  std::string optimizationFlag(BuildProfile build_type) const override {
+  std::string buildFlag(BuildProfile build_type) const override {
     switch (build_type) {
-    case BuildProfile::DEBUG:
-      return "/Od /Z7";
-    case BuildProfile::RELEASE:
-      return "/O2";
-    case BuildProfile::MINSIZEREL:
-      return "/O1";
+    case BuildProfile::DEBUG_Lv1:
+      return "/Zd";
+    case BuildProfile::DEBUG_Lv2:
+    case BuildProfile::DEBUG_Lv3:
+      return "/Z7";
+    default:
+      return "/DNDEBUG";
     }
-    return "/O2";
+  }
+  std::string optimizationFlag(OptimizationLevel lv) const override {
+    switch (lv) {
+    case OptimizationLevel::Perf_Moderate:
+      return "/O2";
+    case OptimizationLevel::Perf_Max:
+      return "/fp:fast";
+    case OptimizationLevel::Space_Moderate:
+      return "/Os";
+    case OptimizationLevel::Space_Max:
+      return "/O1";
+    default:
+      return "";
+    }
   }
 
   std::string compileOnlyFlag() const override { return "/c"; }

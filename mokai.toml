@@ -27,6 +27,10 @@ flags = [
 type = "executable"
 sources = [
     "src/tests/conditions.cpp",
+    "src/tests/extraction.cpp",
+    "src/tests/build.cpp",
+    "src/tests/test_parser.cpp",
+    "src/tests/test_templates.cpp"
 ]
 depends_on = ["MOKAI"]
 

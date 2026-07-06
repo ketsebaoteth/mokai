@@ -1,4 +1,7 @@
 #pragma once
+
+#include "graph/compiler/icompiler.hpp"
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -13,6 +16,7 @@ enum class TargetType {
   Executable,
   StaticLibrary,
   SharedLibrary,
+  InterfaceLibrary,
   Unknown,
 };
 
@@ -49,6 +53,7 @@ struct Target {
 
   std::vector<std::string> sources; // literal paths, globs, or "@group" refs
   std::vector<std::string> include_dirs;
+  std::vector<std::string> defines;
   std::vector<std::string> properties; // literal defines, or "@group" refs
   std::vector<std::string> flags;      // raw passthrough compiler flags
 
@@ -210,6 +215,8 @@ struct ProjectManifest {
   std::vector<PropertyGroup> property_groups;
   std::vector<Target> targets;
   std::vector<Hook> hooks;
+  OptimizationLevel opt_lv;
+  BuildProfile build_profile;
 
   std::unordered_map<std::string, ResolvedDependency> resolved_dependencies;
 };
