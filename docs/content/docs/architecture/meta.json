@@ -1,8 +1,0 @@
-{
-  "title": "Architecture & Optimization",
-  "pages": [
-    "how-mokai-builds",
-    "performance-tuning"
-  ],
-  "defaultOpen": true
-}

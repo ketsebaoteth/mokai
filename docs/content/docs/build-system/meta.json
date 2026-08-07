@@ -1,8 +1,0 @@
-{
-  "title": "Build Architecture",
-  "pages": [
-    "dependencies",
-    "hooks-and-file-groups"
-  ],
-  "defaultOpen": true
-}
