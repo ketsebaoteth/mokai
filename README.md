@@ -15,5 +15,9 @@ to use get started by
 ```
 mokai-rel create myapp
 ```
-then cd to myapp then mokai-rel run
+then cd to myapp then 
+```
+```
+mokai-rel run
+```
 ```
