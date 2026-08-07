@@ -42,7 +42,6 @@ constexpr std::string_view Violet = "\033[35m";
 
 namespace dx {
 
-// Replaces <cctype> std::tolower with an inline ASCII branchless converter
 inline char toLowerAscii(char c) {
   return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
 }
