@@ -1,29 +1,40 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-RESET="\033[0m"
-BOLD="\033[1m"
-GREEN="\033[32m"
-CYAN="\033[36m"
-DIM="\033[2m"
-
-VERSION="0.0.7a"
 INSTALL_DIR="$HOME/.local/bin"
+URL="https://github.com/ketsebaoteth/mokai/releases/latest/download/mokai-rel"
+
 mkdir -p "$INSTALL_DIR"
 
-echo -e "${DIM}⠋ Fetching mokai binary distribution tree v${VERSION}...${RESET}"
+echo "Downloading mokai..."
 
-OS_TYPE="$(uname -s)"
-if [ "$OS_TYPE" = "Linux" ]; then
-  # Fixed URL structure with repository path, release tag, and asset name
-  curl -sSLf "https://github.com/ketsebaoteth/mokai/releases/download/v${VERSION}/mokai-rel" -o "$INSTALL_DIR/mokai"
+if command -v curl >/dev/null 2>&1; then
+  curl -sSLf "$URL" -o "$INSTALL_DIR/mokai"
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$INSTALL_DIR/mokai" "$URL"
 else
-  echo "This installer currently supports Linux environments. For Windows, use Scoop."
+  echo "error: curl or wget is required" >&2
+  exit 1
+fi
+
+if [ ! -s "$INSTALL_DIR/mokai" ]; then
+  echo "error: download failed or binary is empty" >&2
   exit 1
 fi
 
 chmod +x "$INSTALL_DIR/mokai"
 
-echo -e "\n${GREEN}✨ Mokai installed perfectly!${RESET}"
-echo -e "  ${DIM}Location:${RESET} $INSTALL_DIR/mokai"
-echo -e "  Ensure ${CYAN}$INSTALL_DIR${RESET} is appended to your system's ${BOLD}\$PATH${RESET} variable."
+case ":$PATH:" in
+*":$INSTALL_DIR:"*) ;;
+*)
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    if [ -f "$rc" ] && ! grep -qs "$INSTALL_DIR" "$rc"; then
+      echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >>"$rc"
+      echo "Added $INSTALL_DIR to $rc"
+    fi
+  done
+  ;;
+esac
+
+echo "Installed mokai to $INSTALL_DIR/mokai"
+echo "Restart your terminal or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
