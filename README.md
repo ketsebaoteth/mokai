@@ -13,7 +13,6 @@ if that doesnt work try manually downloading binaries from release and chmod +x 
 to use get started by 
 
 ```
-```
 mokai-rel create myapp
 ```
 then cd to myapp then mokai-rel run
