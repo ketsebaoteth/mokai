@@ -15,7 +15,8 @@ echo -e "${DIM}⠋ Fetching mokai binary distribution tree v${VERSION}...${RESET
 
 OS_TYPE="$(uname -s)"
 if [ "$OS_TYPE" = "Linux" ]; then
-  curl -sL "https://github.com/ketsebaoteth/mokai/releases/download/v${VERSION}/mokai-rel" -o "$INSTALL_DIR/mokai"
+  # Changed 'mokai-linux-x64' to 'mokai-rel' to match your GitHub assets
+  curl -sSL "https://github.com{VERSION}/mokai-rel" -o "$INSTALL_DIR/mokai"
 else
   echo "This installer currently supports Linux environments. For Windows, use Scoop."
   exit 1
