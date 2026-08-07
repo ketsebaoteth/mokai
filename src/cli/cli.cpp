@@ -70,8 +70,6 @@ static void sortStrings(std::vector<std::string> &vec) {
   }
 }
 
-// Replaces <fstream> buffer streams by reading full file contents directly
-// using file sizing
 static std::string readFileToString(const fs::path &path) {
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file.is_open())
