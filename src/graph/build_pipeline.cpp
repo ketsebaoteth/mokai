@@ -1,3 +1,4 @@
+#include "cli/cli.hpp"
 #include "graph.hpp"
 #include "graph/compiler/icompiler.hpp"
 #include "log/log.h"
@@ -367,7 +368,12 @@ private:
     std::string pic = m_graph.m_compiler->positionIndependentCodeFlag();
     if (!pic.empty())
       b_args->push_back(pic);
-
+    if (m_graph.m_options.profile == BuildProfile::DEBUG) {
+      std::string debug = m_graph.m_compiler->getDebugFlags();
+      if (!debug.empty()) {
+        b_args->push_back(debug);
+      }
+    }
     auto evaluator = [this](const std::string &cond) {
       return m_graph.m_conditionEngine->evaluate(cond);
     };

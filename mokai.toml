@@ -2,6 +2,7 @@
 name = "mokai"
 cpp_version = "c++23"
 include_dirs = ["src", "tests"]
+default_compiler = "g++"
 
 [target.MOKAI]
 type = "static_library"

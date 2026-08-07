@@ -939,26 +939,26 @@ Cli::handleCreateProject(const std::vector<std::string> &args) {
 
   TemplateGen template_engine;
   auto raw_available = template_engine.getAvailableTemplates();
-  std::string chosen_template = "default";
+  std::string chosen_template = "console"; // Default fallback template
   if (!raw_available.empty()) {
     std::vector<std::string> available_templates;
     for (const auto &[name, desc] : raw_available)
       available_templates.push_back(name + " (" + desc + ")");
     dx::sortStrings(available_templates);
 
-    // Remap index matching after sorting
-    for (size_t i = 0; i < raw_available.size(); ++i) {
-      if (available_templates
-              [promptChoice(
-                   "Select matching embedded layout blueprint template",
-                   available_templates, 0)]
-                  .starts_with(raw_available[i].first)) {
-        chosen_template = raw_available[i].first;
+    // Call promptChoice ONCE to get selected index
+    size_t selected_idx =
+        promptChoice("Select matching embedded layout blueprint template",
+                     available_templates, 0);
+
+    // Remap selected choice back to raw_available template key
+    for (const auto &[name, desc] : raw_available) {
+      if (available_templates[selected_idx].starts_with(name)) {
+        chosen_template = name;
         break;
       }
     }
   }
-
   std::vector<std::string> git_options = {"Yes", "No"};
   bool init_git =
       (promptChoice("Initialize default git repository control index?",

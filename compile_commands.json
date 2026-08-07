@@ -1,67 +1,67 @@
 [
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/cli/cli.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/cli/cli.cpp\"",
     "file": "/home/k/Documents/mokai/src/cli/cli.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/config/config.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/config/config.cpp\"",
     "file": "/home/k/Documents/mokai/src/config/config.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/core/os.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/core/os.cpp\"",
     "file": "/home/k/Documents/mokai/src/core/os.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/build_pipeline.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/build_pipeline.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/build_pipeline.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/compiler/tool_chain_finder.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/compiler/tool_chain_finder.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/compiler/tool_chain_finder.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/condition/ConditionEval.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/condition/ConditionEval.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/condition/ConditionEval.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graph.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/graph.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/graph.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/serialize.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/serialize.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/serialize.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/source_cache.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/source_cache.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/source_cache.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/types.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/graph/types.cpp\"",
     "file": "/home/k/Documents/mokai/src/graph/types.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/templates/template.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/templates/template.cpp\"",
     "file": "/home/k/Documents/mokai/src/templates/template.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -fno-exceptions -fno-rtti -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/entry.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -fno-exceptions -fno-rtti -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/entry.cpp\"",
     "file": "/home/k/Documents/mokai/src/entry.cpp"
   },
   {
     "directory": "/home/k/Documents/mokai",
-    "command": "/usr/bin/clang++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/tests/conditions.cpp\"",
+    "command": "g++ -std=c++23 -O3 -fPIC -I/home/k/Documents/mokai/tests -I/home/k/Documents/mokai/src -c \"/home/k/Documents/mokai/src/tests/conditions.cpp\"",
     "file": "/home/k/Documents/mokai/src/tests/conditions.cpp"
   }
 ]

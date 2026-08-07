@@ -35,6 +35,7 @@ public:
   dependencyFlags(const std::string &obj) const override {
     return {"/showIncludes"};
   }
+  std::string getDebugFlags() const override { return "/Zi /Od /RTC1"; }
 
   std::string standardFlag(std::string_view version, bool is_c) const override {
     return std::format("/std:{}", version);

@@ -7,6 +7,7 @@ constexpr std::string_view CONSOLE_TOML = R"([project]
 name = "{{PROJECT_NAME}}"
 version = "0.1.0"
 cpp_version = "{{CPP_VERSION}}"
+default_compiler = "g++"
 
 [target.{{PROJECT_NAME}}]
 type = "executable"

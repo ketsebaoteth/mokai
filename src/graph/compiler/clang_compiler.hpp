@@ -22,6 +22,8 @@ public:
     return std::format("-I{}", path);
   }
 
+  std::string getDebugFlags() const override { return "-g3"; }
+
   std::string formatDefine(std::string_view def) const override {
     return std::format("-D{}", def);
   }
