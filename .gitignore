@@ -1,3 +1,4 @@
 build
 .mokai
 .cache
+compile_commands.json
