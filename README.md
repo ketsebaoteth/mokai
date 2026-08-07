@@ -69,7 +69,8 @@ Mokai's approach:
 Install the pre-compiled, stripped native binary straight into your path:
 
 ```bash
-curl -fsSL [https://raw.githubusercontent.com/ketsebaoteth/mokai/main/get.sh](https://raw.githubusercontent.com/ketsebaoteth/mokai/main/get.sh) | bash
+
+curl -fsSL https://raw.githubusercontent.com/ketsebaoteth/mokai/main/get.sh | bash
 
 ```
 
