@@ -19,4 +19,3 @@ then cd to myapp then
 ```
 mokai-rel run
 ```
-```
